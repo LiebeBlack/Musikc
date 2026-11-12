@@ -1,0 +1,4 @@
+# Development and packaging tool-chain (not shipped to end users).
+-r requirements.txt
+pytest>=8.4,<10
+pyinstaller>=6.11,<7

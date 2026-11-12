@@ -1,0 +1,10 @@
+# True HQ Audio — runtime dependencies (Windows x64, Python 3.15.2)
+#
+# Pinned exactly: the bit-perfect contract depends on the sample layouts these
+# libraries produce, so an unpinned upgrade is a behavioural risk.
+#   * PySide6 6.12.0  — Qt 6.12 (used for the UI only, never for audio)
+#   * numpy   2.5.4   — vectorised, exact integer repacking
+#   * sounddevice 0.5.6 — ctypes bindings to PortAudio (WASAPI/WDM-KS/ASIO)
+PySide6==6.12.0
+numpy==2.5.4
+sounddevice==0.5.6

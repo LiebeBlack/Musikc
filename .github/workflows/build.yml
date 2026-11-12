@@ -1,0 +1,186 @@
+name: build
+
+on:
+  push:
+    branches: [main, master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  PYTHON_VERSION: "3.15.2"
+  PYTHONUTF8: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  QT_QPA_PLATFORM: offscreen
+
+defaults:
+  run:
+    shell: pwsh
+
+jobs:
+  # ------------------------------------------------------------------ quality
+  test:
+    name: Tests · Python 3.15.2
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.15.2
+        id: setup-python
+        uses: actions/setup-python@v6
+        continue-on-error: true
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          allow-prereleases: true
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install Python 3.15.2 (fallback)
+        if: steps.setup-python.outcome == 'failure'
+        run: |
+          $url = "https://www.python.org/ftp/python/3.15.2/python-3.15.2-amd64.exe"
+          $installer = Join-Path $env:RUNNER_TEMP "python-3.15.2-amd64.exe"
+          Write-Host "downloading $url"
+          Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+          Start-Process -FilePath $installer -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0 Include_launcher=1" -Wait
+          $pythonRoot = "C:\Program Files\Python315"
+          if (-not (Test-Path $pythonRoot)) { throw "Python 3.15 installation failed" }
+          Add-Content -Path $env:GITHUB_PATH -Value $pythonRoot
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $pythonRoot "Scripts")
+
+      - name: Verify interpreter
+        run: |
+          python --version
+          python -c "import sys; assert sys.version_info[:3] == (3, 15, 2), sys.version; print('Python 3.15.2 confirmed')"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements-dev.txt
+
+      - name: Byte-compile every module
+        run: python -m compileall -q src main.py setup_env.py scripts
+
+      - name: Unit and engine tests
+        run: python -m pytest -q tests
+
+      - name: Audio environment diagnostics
+        continue-on-error: true
+        run: python main.py --diagnostics
+
+  # -------------------------------------------------------------------- build
+  package:
+    name: Freeze · Installer
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.15.2
+        id: setup-python
+        uses: actions/setup-python@v6
+        continue-on-error: true
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          allow-prereleases: true
+          check-latest: false
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install Python 3.15.2 (fallback)
+        if: steps.setup-python.outcome == 'failure'
+        run: |
+          $url = "https://www.python.org/ftp/python/3.15.2/python-3.15.2-amd64.exe"
+          $installer = Join-Path $env:RUNNER_TEMP "python-3.15.2-amd64.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
+          Start-Process -FilePath $installer -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0 Include_launcher=1" -Wait
+          $pythonRoot = "C:\Program Files\Python315"
+          Add-Content -Path $env:GITHUB_PATH -Value $pythonRoot
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $pythonRoot "Scripts")
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install -r requirements-dev.txt
+
+      - name: Fetch native audio binaries (libsndfile, ffmpeg)
+        continue-on-error: true
+        run: python setup_env.py --install-native
+
+      - name: Render icon and export QSS
+        run: |
+          python scripts/make_icon.py
+          python scripts/export_stylesheet.py
+
+      - name: Freeze the application
+        run: python -m PyInstaller truehqaudio.spec --noconfirm --clean --distpath dist --workpath build
+
+      - name: Smoke-test the frozen executable
+        run: |
+          $exe = "dist\TrueHQAudio\TrueHQAudio.exe"
+          if (-not (Test-Path $exe)) { throw "missing $exe" }
+          $proc = Start-Process -FilePath $exe -ArgumentList "--diagnostics" -PassThru -Wait -NoNewWindow
+          if ($proc.ExitCode -ne 0) { throw "frozen diagnostics failed with $($proc.ExitCode)" }
+
+      - name: Build portable archive
+        run: |
+          $version = (Select-String -Path src\config.py -Pattern '^APP_VERSION' | Select-Object -First 1).Line.Split('=')[1].Trim().Trim('"')
+          $target = "dist\TrueHQAudio-$version-portable-x64.zip"
+          Compress-Archive -Path dist\TrueHQAudio\* -DestinationPath $target -CompressionLevel Optimal
+          Write-Host "created $target"
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Compile the installer
+        run: |
+          $version = (Select-String -Path src\config.py -Pattern '^APP_VERSION' | Select-Object -First 1).Line.Split('=')[1].Trim().Trim('"')
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw "ISCC not found" }
+          & $iscc "/DAppVersion=$version" "installer\truehqaudio.iss"
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with $LASTEXITCODE" }
+          Get-ChildItem installer\Output\*.exe | ForEach-Object { Write-Host "installer: $($_.FullName)" }
+
+      - name: Checksums
+        run: |
+          $files = @()
+          $files += Get-ChildItem dist\*.zip
+          $files += Get-ChildItem installer\Output\*.exe
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -Algorithm SHA256 -Path $file.FullName).Hash.ToLower()
+            "$hash  $($file.Name)"
+          }
+          $lines | Set-Content -Encoding ascii dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrueHQAudio-windows-x64
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+            installer/Output/*.exe
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: True HQ Audio ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
+            installer/Output/*.exe
