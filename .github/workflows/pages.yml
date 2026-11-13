@@ -24,9 +24,12 @@ concurrency:
 jobs:
   validate:
     name: Validate static documentation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
+
+      - name: Install Qt runtime dependencies
+        run: sudo apt-get update && sudo apt-get install --yes libegl1
 
       - name: Set up Python for application tests
         uses: actions/setup-python@v6
@@ -60,7 +63,7 @@ jobs:
     name: Deploy GitHub Pages
     needs: validate
     if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

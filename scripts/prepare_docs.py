@@ -9,9 +9,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
 PAGES = ("index.html", "architecture.html", "installation.html", "support.html", "404.html")
-META_REPOSITORY = re.compile(r'(<meta name="gh-repository" content=")[^"]*("\s*/>)')
-META_PAGES = re.compile(r'(<meta name="gh-pages-url" content=")[^"]*("\s*/>)')
-CANONICAL = re.compile(r'(<link rel="canonical" href=")[^"]*("\s*/>)')
+META_REPOSITORY = re.compile(r'(<meta name="gh-repository" content=")[^"]*("\s*/?>)')
+META_PAGES = re.compile(r'(<meta name="gh-pages-url" content=")[^"]*("\s*/?>)')
+CANONICAL = re.compile(r'(<link rel="canonical" href=")[^"]*("\s*/?>)')
 
 
 def replace_once(pattern: re.Pattern[str], text: str, replacement: str, description: str) -> str:
