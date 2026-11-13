@@ -1,0 +1,33 @@
+# --- True HQ Audio -----------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+build_verify/
+dist_verify/
+*.spec.bak
+tests/artifacts/
+tests/**/__pycache__/
+tests/*.log
+.pytest_cache/
+
+# Native binaries are downloaded by setup_env.py, never committed.
+resources/native/*.dll
+resources/native/*.exe
+resources/native/manifest.json
+resources/icons/*.ico
+
+# Installer output
+installer/Output/
+installer/*.log
+
+# Local settings / logs
+*.jsonl
+*.log
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

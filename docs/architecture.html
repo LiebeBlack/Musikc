@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#080b10">
+  <meta name="description" content="Arquitectura del motor True HQ Audio: decoder, conversión de contenedor, ring SPSC, driver, reloj, DoP e integridad." />
+  <meta name="gh-repository" content="" />
+  <meta name="gh-pages-url" content="" />
+  <link rel="canonical" href="" />
+  <title>Arquitectura del motor · True HQ Audio 2.5.9</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="site.css">
+  <script src="site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Saltar al contenido</a>
+  <header class="site-header">
+    <a class="brand" href="index.html" aria-label="True HQ Audio, inicio">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M20 2 38 20 20 38 2 20 20 2Z"/><path d="m9 20 5-4 4 8 4-10 4 12 5-6"/></svg></span>
+      <span class="brand-wordmark"><strong>TRUE HQ AUDIO</strong><small>DOCUMENTACIÓN 2.5.9</small></span>
+    </a>
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="main-nav" aria-label="Abrir menú"><span></span><span></span><span></span></button>
+    <nav id="main-nav" class="main-nav" aria-label="Navegación principal">
+      <a href="index.html">Inicio</a><a href="architecture.html" aria-current="page">Arquitectura</a><a href="installation.html">Instalación</a><a href="support.html">Ayuda</a><a class="nav-cta" href="#contenido" data-project-link>Ver código <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+  <main id="contenido">
+    <section class="doc-hero section-wrap">
+      <p class="eyebrow"><span class="status-dot"></span> DOCUMENTACIÓN TÉCNICA / 01</p>
+      <h1>La ruta, etapa<br><span>por etapa.</span></h1>
+      <p class="hero-lede">Cómo se decodifica, negocia y entrega audio True HQ. “Bit-perfect” se trata como un veredicto condicional, no como una propiedad que la interfaz pueda garantizar en todo hardware.</p>
+      <div class="doc-meta"><span>Windows x64</span><i></i><span>Python 3.15.2</span><i></i><span>Revisión de software 2.5.9</span></div>
+    </section>
+
+    <section class="section-wrap doc-section">
+      <div class="doc-two-col">
+        <aside class="doc-aside"><p class="eyebrow">EN ESTA PÁGINA</p><a href="#ruta">Ruta de señal</a><a href="#hilos">Hilos y callback</a><a href="#formatos">Formatos y mapeo</a><a href="#reloj">Reloj y driver</a><a href="#integridad">Integridad</a><a href="#limites">Límites conocidos</a></aside>
+        <div class="doc-content">
+          <section id="ruta" class="doc-block"><p class="eyebrow">01 / DATA PATH</p><h2>Del contenedor<br><span>al driver.</span></h2><p>La ruta lógica implementada es decoder → mapeo de representación, cuando es exacto → ring SPSC → callback de PortAudio → driver elegido. No se introduce un control de volumen digital ni un grafo DSP dentro de esa ruta.</p>
+            <div class="doc-flow"><span>ARCHIVO</span><b>→</b><span>DECODER</span><b>→</b><span>RING SPSC</span><b>→</b><span>PORTAUDIO</span><b>→</b><span>DRIVER</span></div>
+            <p>El modo exclusivo es una petición al driver, no un bypass universal del hardware. Windows, el host API y el fabricante siguen teniendo control sobre lo que sucede después de la llamada al callback.</p>
+          </section>
+          <section id="hilos" class="doc-block"><p class="eyebrow">02 / THREADING</p><h2>Control separado<br><span>del tiempo real.</span></h2><div class="doc-table-wrap"><table class="doc-table"><thead><tr><th>Componente</th><th>Responsabilidad</th><th>Consideración</th></tr></thead><tbody>
+            <tr><td>Supervisor</td><td>Comandos, cambios de estado, hot-plug y publicación de telemetría.</td><td>No debe hacer trabajo pesado dentro del callback.</td></tr>
+            <tr><td>Feeder</td><td>Decodifica y rellena el ring desde un hilo separado.</td><td>Solicita MMCSS “Pro Audio” y prioridad elevada; el sistema puede denegarlas.</td></tr>
+            <tr><td>Callback</td><td>Consume bytes del ring y completa el bloque que pide PortAudio.</td><td>Debe ser corto. Si falta audio, se contabiliza un xrun y se entrega silencio para no bloquear el driver.</td></tr>
+            <tr><td>Qt UI</td><td>Presenta snapshots y recibe eventos por señales.</td><td>La UI no es el reloj maestro del audio.</td></tr>
+          </tbody></table></div><p><strong>Matiz importante:</strong> Python, el GIL, el planificador de Windows y los drivers de audio no permiten prometer cero cortes. La prioridad es una solicitud de planificación, no una garantía de tiempo real duro.</p></section>
+          <section id="formatos" class="doc-block"><p class="eyebrow">03 / REPRESENTACIÓN</p><h2>Conversión de contenedor,<br><span>no de frecuencia.</span></h2><p>El mapeo PCM puede ensanchar una palabra cuando el destino lo exige; solo se declara exacto si conserva los bits significativos. La conversión que descarte información se rechaza salvo que el usuario habilite explícitamente el modo degradado.</p>
+            <div class="doc-callout"><strong>24-bit packed → 32-bit word</strong><span>Desplazamiento de representación. El DAC recibe un contenedor de 32 bits con los 24 bits válidos, si el driver acepta ese formato.</span></div>
+            <p>Los parsers nativos cubren WAV/RF64, AIFF/AIFF-C compatible, DSF y DFF sin DST. FLAC requiere libsndfile o una ruta fallback con FFmpeg. La disponibilidad concreta depende de los binarios instalados y del formato contenido.</p>
+          </section>
+          <section id="reloj" class="doc-block"><p class="eyebrow">04 / OUTPUT NEGOTIATION</p><h2>La frecuencia la acepta<br><span>el dispositivo.</span></h2><p>El motor sondea los formatos disponibles y solicita el sample rate de la fuente. Comprueba los valores que reporta el stream abierto y falla si no coinciden. Esa comprobación no puede inspeccionar internamente el firmware ni demostrar la salida analógica.</p>
+            <div class="driver-compact"><span><b>WASAPI Exclusive</b><small>Host API habitual para salida exclusiva en Windows.</small></span><span><b>WDM-KS</b><small>Kernel streaming; disponibilidad según dispositivo y driver.</small></span><span><b>ASIO</b><small>Solo si la distribución PortAudio instalada incorpora soporte ASIO.</small></span><span><b>Modo compartido</b><small>El sistema puede aplicar su mezclador; no se etiqueta como ruta garantizada bit-perfect.</small></span></div>
+          </section>
+          <section id="integridad" class="doc-block"><p class="eyebrow">05 / VERDICT</p><h2>Qué significa<br><span>el indicador.</span></h2><p>El badge solo se activa cuando el motor tiene una fuente compatible, un formato de salida negociado, una ruta que considera exacta y ningún xrun registrado en la sesión actual. Se apaga cuando cambian esas condiciones.</p>
+            <ul class="doc-list"><li><strong>BIT-PERFECT</strong> es un estado calculado por el software y dependiente de la configuración.</li><li>El hash BLAKE2b cubre los bytes registrados por el motor en la salida; no es una captura eléctrica de la salida del DAC.</li><li>Un xrun significa que el callback tuvo que completar muestras faltantes con silencio; la sesión deja de ser exacta.</li><li>En modo compartido, el OS mixer puede modificar o remuestrear después de la aplicación.</li></ul>
+          </section>
+          <section id="limites" class="doc-block"><p class="eyebrow">06 / ALCANCE</p><h2>Limitaciones conocidas.</h2><ul class="doc-list"><li>Windows 10/11 x64 como plataforma objetivo.</li><li>DoP es transporte DSD por PCM; no es salida DSD nativa del driver.</li><li>DST comprimido no se decodifica.</li><li>El soporte ASIO depende de la build de PortAudio presente.</li><li>No existe volumen digital, ecualizador ni normalizador.</li><li>El badge no inspecciona filtros de driver, firmware DAC, amplificador ni circuito analógico.</li></ul></section>
+          <nav class="doc-next" aria-label="Siguiente documentación"><a href="installation.html"><small>SIGUIENTE</small><strong>Instalación y build →</strong></a><a href="support.html"><small>AYUDA</small><strong>Resolución de problemas →</strong></a></nav>
+        </div>
+      </div>
+    </section>
+  </main>
+  <footer class="site-footer"><a class="brand footer-brand" href="index.html"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M20 2 38 20 20 38 2 20 20 2Z"/><path d="m9 20 5-4 4 8 4-10 4 12 5-6"/></svg></span><span class="brand-wordmark"><strong>TRUE HQ AUDIO</strong><small>2.5.9 · DOCUMENTACIÓN</small></span></a><p>Descripción del comportamiento del software; no sustituye la documentación del driver o del DAC.</p><div class="footer-links"><a href="index.html">Inicio</a><a href="installation.html">Instalación</a><a href="support.html">Ayuda</a></div></footer>
+</body>
+</html>

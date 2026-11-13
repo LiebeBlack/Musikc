@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#080b10">
+  <meta name="description" content="True HQ Audio 2.5.9: reproductor de referencia para Windows con salida exclusiva, cero DSP y rechazo explícito del remuestreo." />
+  <meta name="gh-repository" content="" />
+  <meta name="gh-pages-url" content="" />
+  <link rel="canonical" href="" />
+  <meta property="og:title" content="True HQ Audio — escucha sin intermediarios" />
+  <meta property="og:description" content="Reproductor de audio para Windows con WASAPI Exclusive, reproducción DoP y señal sin procesamiento intencional." />
+  <meta property="og:type" content="website" />
+  <title>True HQ Audio 2.5.9 — reproducción de referencia</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="site.css">
+  <script src="site.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#contenido">Saltar al contenido</a>
+  <header class="site-header">
+    <a class="brand" href="#inicio" aria-label="True HQ Audio, inicio">
+      <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M20 2 38 20 20 38 2 20 20 2Z"/><path d="m9 20 5-4 4 8 4-10 4 12 5-6"/></svg></span>
+      <span class="brand-wordmark"><strong>TRUE HQ AUDIO</strong><small>REFERENCE PLAYBACK</small></span>
+    </a>
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="main-nav" aria-label="Abrir menú">
+      <span></span><span></span><span></span>
+    </button>
+    <nav id="main-nav" class="main-nav" aria-label="Navegación principal">
+      <a href="#principios">Principios</a>
+      <a href="#formatos">Formatos</a>
+      <a href="#hardware">Hardware</a>
+      <a href="architecture.html">Arquitectura</a>
+      <a href="#instalacion">Instalación</a>
+      <a href="support.html">Ayuda</a>
+      <a class="nav-cta" href="#instalacion" data-release-link>Descargar 2.5.9 <span aria-hidden="true">↗</span></a>
+    </nav>
+  </header>
+
+  <main id="contenido">
+    <section id="inicio" class="hero section-wrap">
+      <div class="hero-copy">
+        <p class="eyebrow"><span class="status-dot"></span> WINDOWS · VERSIÓN 2.5.9</p>
+        <h1>El archivo entra.<br><span>El DAC lo recibe.</span></h1>
+        <p class="hero-lede">Un reproductor de referencia para Windows que evita añadir ecualización, normalización o remuestreo intencional al camino de audio.</p>
+        <div class="hero-actions">
+          <a class="button button-primary" href="#instalacion" data-release-link>Ver descargas <span aria-hidden="true">→</span></a>
+          <a class="button button-quiet" href="architecture.html">Arquitectura técnica</a>
+        </div>
+        <div class="hero-meta"><span>WASAPI Exclusive</span><i></i><span>PCM y DoP</span><i></i><span>Windows 10/11 · x64</span></div>
+      </div>
+      <div class="hero-art" aria-label="Diagrama de la ruta de audio">
+        <div class="art-topline"><span>RUTA DE SEÑAL</span><span class="live-label"><b></b> SIN DSP INTENCIONAL</span></div>
+        <div class="signal-flow">
+          <div class="signal-node"><span class="node-icon">01</span><strong>Archivo</strong><small>PCM / DSD</small></div>
+          <span class="signal-link"><i></i><i></i><i></i></span>
+          <div class="signal-node"><span class="node-icon">02</span><strong>Decodificador</strong><small>sin pérdida*</small></div>
+          <span class="signal-link"><i></i><i></i><i></i></span>
+          <div class="signal-node node-ring"><span class="node-icon">03</span><strong>Ring SPSC</strong><small>sin locks en callback</small></div>
+          <span class="signal-link"><i></i><i></i><i></i></span>
+          <div class="signal-node"><span class="node-icon">04</span><strong>Driver</strong><small>modo exclusivo</small></div>
+          <span class="signal-link"><i></i><i></i><i></i></span>
+          <div class="signal-node node-dac"><span class="dac-glyph">DAC</span><strong>Hardware</strong><small>reloj del dispositivo</small></div>
+        </div>
+        <div class="art-footer"><span>RELOJ DE SALIDA</span><strong>COINCIDE CON LA FUENTE*</strong><span class="clock-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></div>
+        <p class="art-note">* Cuando el dispositivo acepta ese formato. El motor rechaza la salida si no puede abrir la frecuencia solicitada sin conversiones de frecuencia propias.</p>
+      </div>
+      <div class="hero-index" aria-hidden="true">01 <span>—</span> 04</div>
+    </section>
+
+    <section class="proof-strip" aria-label="Características principales">
+      <div><strong>0</strong><span>ecualizadores<br>en el camino</span></div>
+      <div><strong>0</strong><span>normalización<br>de volumen</span></div>
+      <div><strong>DoP</strong><span>DSD transportado<br>por PCM compatible</span></div>
+      <div><strong>2.5.9</strong><span>versión actual<br>del proyecto</span></div>
+    </section>
+
+    <section id="principios" class="section-wrap section-block">
+      <div class="section-heading"><p class="eyebrow">01 / FILOSOFÍA</p><h2>Menos promesas.<br><span>Más transparencia.</span></h2><p>La palabra “bit-perfect” solo sirve si se explica qué se comprueba y qué no se controla.</p></div>
+      <div class="principle-grid">
+        <article class="principle-card"><span class="card-index">A / 01</span><div class="principle-icon icon-wave" aria-hidden="true">≈</div><h3>Sin procesamiento añadido</h3><p>La aplicación no incorpora ganancia digital, ecualizador, limitador, normalización ni remuestreador en su ruta intencional.</p><span class="card-foot">NO DSP INTENCIONAL</span></article>
+        <article class="principle-card"><span class="card-index">A / 02</span><div class="principle-icon icon-clock" aria-hidden="true">◷</div><h3>Negociación explícita</h3><p>Se comprueba el formato que informa el driver. Si la salida no acepta la frecuencia fuente, se comunica el rechazo en lugar de ocultar el cambio.</p><span class="card-foot">SIN RESAMPLE SILENCIOSO</span></article>
+        <article class="principle-card"><span class="card-index">A / 03</span><div class="principle-icon icon-shield" aria-hidden="true">◇</div><h3>Estado honesto</h3><p>Un underrun, una conversión con pérdida o el modo compartido impiden mostrar una afirmación de bit-perfect.</p><span class="card-foot">ESTADO CONDICIONAL</span></article>
+      </div>
+      <aside class="honesty-note"><span class="note-mark">i</span><p><strong>Importante:</strong> el programa puede verificar los bytes que entrega al driver y el formato que este declara. No puede demostrar lo que hacen el firmware del DAC, el mezclador del sistema si se usa modo compartido, ni los efectos de otros controladores.</p></aside>
+    </section>
+
+    <section id="ruta" class="signal-section section-block">
+      <div class="section-wrap signal-layout">
+        <div class="section-heading"><p class="eyebrow">02 / CAMINO DE AUDIO</p><h2>Una ruta que<br><span>se puede inspeccionar.</span></h2><p>El motor separa el plano de control de la alimentación de audio y publica telemetría para la interfaz.</p><a class="text-link" href="architecture.html">Explorar arquitectura técnica <span>→</span></a></div>
+        <div class="pipeline">
+          <div class="pipeline-step"><div class="pipeline-number">01</div><div><strong>Decoder</strong><p>Lee contenedor y muestras. WAV, AIFF, DSF y DFF tienen parsers nativos; FLAC usa libsndfile cuando está disponible.</p></div><span class="pipeline-tag">FUENTE</span></div>
+          <div class="pipeline-step"><div class="pipeline-number">02</div><div><strong>Mapeo de formato</strong><p>El ensanchado de palabras PCM solo se considera exacto si conserva los bits válidos. No se cambia la frecuencia por software.</p></div><span class="pipeline-tag">REPACK</span></div>
+          <div class="pipeline-step"><div class="pipeline-number">03</div><div><strong>Ring buffer SPSC</strong><p>Un hilo alimenta el búfer; el callback consume datos y escribe el bloque. La recuperación y la cola se registran.</p></div><span class="pipeline-tag">BUFFER</span></div>
+          <div class="pipeline-step"><div class="pipeline-number">04</div><div><strong>Driver y DAC</strong><p>WASAPI Exclusive o WDM-KS cuando el equipo lo admite. ASIO depende de una compilación de PortAudio compatible.</p></div><span class="pipeline-tag">SALIDA</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="formatos" class="section-wrap section-block formats-section">
+      <div class="section-heading heading-row"><div><p class="eyebrow">03 / FORMATOS</p><h2>Archivos y transporte,<br><span>sin confundirlos.</span></h2></div><p>La compatibilidad depende de la variante del archivo, de las dependencias instaladas y de las capacidades que reporte el DAC.</p></div>
+      <div class="format-table-wrap"><table class="format-table"><thead><tr><th>Fuente</th><th>Lectura</th><th>Salida</th><th>Observación</th></tr></thead><tbody>
+        <tr><td><span class="format-mark pcm">PCM</span> WAV / RF64</td><td>PCM 8–32 · float 32/64</td><td>Frecuencia fuente</td><td>Parser nativo</td></tr>
+        <tr><td><span class="format-mark pcm">PCM</span> AIFF / AIFF-C</td><td>PCM · float 32/64</td><td>Frecuencia fuente</td><td>Algunos codecs AIFF-C no compatibles se rechazan</td></tr>
+        <tr><td><span class="format-mark lossless">LOSSLESS</span> FLAC</td><td>Entero nativo vía libsndfile</td><td>Frecuencia fuente</td><td>Se necesita la DLL para esa ruta</td></tr>
+        <tr><td><span class="format-mark dsd">1-BIT</span> DSF / DFF</td><td>DSD en bloques</td><td>DoP si el DAC lo admite</td><td>DST no está soportado</td></tr>
+      </tbody></table></div>
+      <div class="dop-grid"><div><p class="eyebrow">TRANSPORTE DSD SOBRE PCM</p><h3>DoP no es conversión a PCM.</h3><p>Los bits DSD se empaquetan con los marcadores DoP; la frecuencia PCM de transporte es DSD ÷ 16. La ruta se usa solo si el driver acepta esa frecuencia y profundidad.</p></div><div class="dop-rates"><span><b>DSD64</b><i>176.4 kHz</i></span><span><b>DSD128</b><i>352.8 kHz</i></span><span><b>DSD256</b><i>705.6 kHz</i></span><span><b>DSD512</b><i>1411.2 kHz</i></span></div></div>
+    </section>
+
+    <section id="hardware" class="hardware-section section-block">
+      <div class="section-wrap hardware-layout">
+        <div class="section-heading"><p class="eyebrow">04 / HARDWARE</p><h2>El modo importa.<br><span>El driver también.</span></h2><p>El nombre del DAC no basta: la interfaz presenta el host API seleccionado y las frecuencias que pudo sondear.</p></div>
+        <div class="driver-list">
+          <article><span class="driver-rank">01</span><div><h3>WASAPI Exclusive</h3><p>Intenta abrir el endpoint en modo exclusivo y evita el mezclador compartido mientras la sesión lo mantiene.</p></div><span class="driver-state state-good">RECOMENDADO</span></article>
+          <article><span class="driver-rank">02</span><div><h3>WDM-KS</h3><p>Acceso de kernel streaming cuando el dispositivo y su driver aceptan la configuración.</p></div><span class="driver-state">ALTERNATIVA</span></article>
+          <article><span class="driver-rank">03</span><div><h3>ASIO</h3><p>Solo aparece si el PortAudio disponible tiene soporte ASIO; el SDK de Steinberg no se incluye.</p></div><span class="driver-state">DEPENDIENTE</span></article>
+          <article><span class="driver-rank">04</span><div><h3>MME / DirectSound / compartido</h3><p>Puede atravesar el mezclador del sistema. La aplicación no lo presenta como una ruta garantizada bit-perfect.</p></div><span class="driver-state state-caution">COMPARTIDO</span></article>
+        </div>
+      </div>
+    </section>
+
+    <section id="instalacion" class="section-wrap section-block install-section">
+      <div class="section-heading"><p class="eyebrow">05 / DESCARGA E INSTALACIÓN</p><h2>Empieza con una<br><span>versión verificable.</span></h2><p>El release de GitHub es la fuente de instaladores y archivos portables. No descargues binarios de enlaces no oficiales.</p></div>
+      <div class="install-grid">
+        <article class="download-card"><span class="download-kicker">WINDOWS · X64</span><h3>True HQ Audio 2.5.9</h3><p>Instalador Inno Setup y ZIP portable se publican como assets del release cuando finaliza el workflow.</p><a class="button button-primary" href="#instalacion" data-release-link>Ir al último release <span>↗</span></a><p class="download-foot">Comprueba el SHA-256 adjunto al release antes de instalar.</p></article>
+        <article class="source-card"><span class="download-kicker">PARA DESARROLLO</span><h3>Ejecutar desde el código</h3><p>Windows x64 · CPython 3.15.2 · el bootstrap crea un entorno virtual dentro del proyecto.</p><div class="code-line"><code>python setup_env.py --run</code><button class="copy-button" type="button" data-copy="python setup_env.py --run" aria-label="Copiar comando">COPIAR</button></div><div class="code-line"><code>python main.py --diagnostics</code><button class="copy-button" type="button" data-copy="python main.py --diagnostics" aria-label="Copiar comando">COPIAR</button></div></article>
+      </div>
+      <p class="release-caveat"><strong>Estado de publicación:</strong> la página enlaza con GitHub Releases. Si aún no se ha publicado el tag correspondiente, el enlace mostrará el release anterior o ninguno; el workflow de CI debe terminar correctamente antes de que exista un nuevo instalador. Consulta <a href="installation.html">la guía de build</a> para conocer qué genera el workflow.</p>
+    </section>
+
+    <section class="faq-section section-block">
+      <div class="section-wrap"><div class="section-heading"><p class="eyebrow">06 / PREGUNTAS FRECUENTES</p><h2>Lo esencial,<br><span>sin letra pequeña.</span></h2></div>
+        <div class="faq-list">
+          <details><summary>¿Por qué no hay control de volumen?</summary><p>El control digital de volumen escala muestras. Para no alterar la señal de origen, el nivel se controla en el DAC o en el amplificador.</p></details>
+          <details><summary>¿El programa garantiza lo que sale físicamente del DAC?</summary><p>No. Puede inspeccionar el formato que informa el driver y los bytes entregados por la aplicación. No puede observar el procesamiento interno del driver, el firmware del DAC o etapas analógicas.</p></details>
+          <details><summary>¿Puedo reproducir cualquier frecuencia de muestreo?</summary><p>Solo si el endpoint acepta el formato. Si no lo acepta, la aplicación comunica el error y no intenta remuestrear por software.</p></details>
+          <details><summary>¿ASIO está incluido?</summary><p>El programa consulta los host APIs de PortAudio disponibles en el equipo. No distribuye el SDK ASIO ni garantiza que la build de PortAudio lo incluya.</p></details>
+          <details><summary>¿Qué hace falta para compilar el instalador?</summary><p>Python 3.15.2 x64, las dependencias fijadas en requirements y Inno Setup 6. GitHub Actions instala Inno Setup, ejecuta pruebas y empaqueta los artefactos.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta section-wrap"><div><p class="eyebrow">TRUE HQ AUDIO · 2.5.9</p><h2>Primero, la fuente.<br><span>Después, el DAC.</span></h2></div><a class="button button-primary" href="#inicio" data-project-link>Ver el proyecto <span>↗</span></a></section>
+  </main>
+
+  <footer class="site-footer"><a class="brand footer-brand" href="#inicio"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 40 40"><path d="M20 2 38 20 20 38 2 20 20 2Z"/><path d="m9 20 5-4 4 8 4-10 4 12 5-6"/></svg></span><span class="brand-wordmark"><strong>TRUE HQ AUDIO</strong><small>2.5.9 · WINDOWS</small></span></a><p>Documentación del proyecto. Sin analítica, fuentes externas ni dependencias JavaScript.</p><div class="footer-links"><a href="#inicio" data-project-link>GitHub</a><a href="#instalacion" data-release-link>Releases</a><a href="#inicio" data-license-link>Licencia</a></div></footer>
+</body>
+</html>

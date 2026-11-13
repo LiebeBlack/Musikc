@@ -37,7 +37,7 @@ import urllib.error
 import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Optional
 
 ROOT = Path(__file__).resolve().parent
 VENV_DIR = ROOT / ".venv"
@@ -520,6 +520,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             return check_project()
         if arguments.install_native:
             verify_interpreter(strict=False)
+            if not venv_exists():
+                # The soundfile-wheel fallback installs a package; keep it inside
+                # the project environment instead of polluting the system Python.
+                create_venv(repair=False)
             install_native(force=arguments.force_native, refresh_manifest=arguments.refresh_manifest)
             check_native()
             return 0

@@ -90,8 +90,9 @@ The packaged installer needs none of the above: it ships a self-contained build.
 ## 4. Install and run from source
 
 ```powershell
-git clone https://github.com/your-org/true-hq-audio.git
-cd true-hq-audio
+# Sustituye OWNER/REPOSITORY por el repositorio GitHub real
+git clone https://github.com/OWNER/REPOSITORY.git
+cd REPOSITORY
 python setup_env.py            # creates .venv, installs deps, fetches native DLLs
 python setup_env.py --run      # launches the player
 ```
@@ -247,7 +248,17 @@ records every byte, then asserts:
 2. after a seek, the recorded bytes are identical to the file at that offset,
 3. a 768 kHz file on a 48 kHz DAC is **refused** (no resampling),
 4. a DSF file produces valid DoP frames with alternating `0x05/0xFA` markers,
-5. starving the ring buffer raises xruns and removes the BIT-PERFECT badge.
+5. starving the ring buffer raises xruns and removes the BIT-PERFECT badge,
+6. a gapless splice is sample-continuous: the captured stream equals
+   `track A + track B` byte for byte, with zero xruns,
+7. a format change between tracks reopens the DAC at the new clock and keeps
+   playing,
+8. the natural end of a track is not counted as an underrun, and pressing play
+   afterwards restarts it.
+
+`test_flac_backend.py` repeats the bit-identity proof through libsndfile and
+through the ffmpeg fallback, and `test_ui_widgets.py` renders every custom
+widget offscreen so QPainter regressions fail the build.
 
 `tests/ui_smoke.py` builds the full window, drives it and writes PNGs — useful
 for reviewing the design without a DAC attached.
@@ -265,8 +276,8 @@ Outputs:
 
 ```
 dist/TrueHQAudio/TrueHQAudio.exe                    frozen application
-dist/TrueHQAudio-1.0.0-portable-x64.zip             portable archive
-installer/Output/TrueHQAudio-1.0.0-x64-Setup.exe    installer
+dist/TrueHQAudio-2.5.9-portable-x64.zip             portable archive
+installer/Output/TrueHQAudio-2.5.9-x64-Setup.exe    installer
 ```
 
 `scripts/build.py` renders the icon, exports the QSS, runs the tests, freezes the

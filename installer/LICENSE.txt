@@ -1,0 +1,36 @@
+True HQ Audio — End User License Agreement
+==========================================
+
+Copyright (c) 2026 True HQ Audio Labs. All rights reserved.
+
+1. GRANT OF LICENSE
+   True HQ Audio ("the Software") is licensed, not sold. You may install and use
+   the Software on any number of computers that you personally own or control.
+
+2. BIT-PERFECT INTENT
+   The Software is designed to reproduce digital audio without modification.
+   It intentionally exposes no volume control, normalisation, limiter, equaliser
+   or resampling stage. Any alteration of the signal performed outside the
+   Software (operating system mixer, driver effects, DSP in the DAC firmware)
+   is outside the control of the Software and voids the bit-perfect claim.
+
+3. THIRD-PARTY COMPONENTS
+   The Software includes or links against:
+     * Qt 6 / PySide6 — LGPL v3 (https://www.qt.io/licensing)
+     * NumPy — BSD 3-Clause
+     * PortAudio via python-sounddevice — MIT
+     * libsndfile (optional) — LGPL v2.1
+     * FFmpeg (optional) — LGPL/GPL depending on the build used
+   Their licenses apply to those components. Source code for the LGPL
+   components is available from their respective upstream projects.
+
+4. NO WARRANTY
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+
+5. LIMITATION OF LIABILITY
+   IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+   DAMAGES OR OTHER LIABILITY ARISING FROM THE USE OF THE SOFTWARE, INCLUDING
+   BUT NOT LIMITED TO HEARING DAMAGE CAUSED BY OUTPUT LEVELS SET BY THE USER,
+   THE DAC OR THE AMPLIFIER.
