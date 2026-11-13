@@ -9,6 +9,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import pytest
+from PySide6.QtCore import QSize
 from PySide6.QtWidgets import QApplication
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -71,8 +72,11 @@ def test_window_minimum_covers_panel_requirements(app: QApplication, tmp_path: P
     window = make_window(tmp_path)
     window.show()
     app.processEvents()
-    assert window.minimumWidth() >= 920
-    assert window.minimumHeight() >= 620
+    available = window.screen().availableGeometry()
+    # The floor never exceeds the desktop, so a scaled laptop keeps it on screen.
+    assert window.minimumWidth() <= available.width()
+    assert window.minimumHeight() <= available.height()
+    assert window.minimumWidth() >= 320
     window.resize(window.minimumWidth(), window.minimumHeight())
     app.processEvents()
     assert window.width() >= window.minimumWidth()
@@ -98,6 +102,74 @@ def test_compact_playlist_hides_lower_priority_columns(app: QApplication):
     assert not view.table.isColumnHidden(2)
     assert not view.table.isColumnHidden(3)
     view.close()
+
+
+def test_table_columns_never_clip_the_duration_header(app: QApplication):
+    from src.ui.widgets.library_view import LibraryView
+    from src.ui.widgets.playlist_view import PlaylistView
+
+    queue = PlaylistView(Playlist(), toolbar=False)
+    library = LibraryView(Library([]))
+    for view in (queue, library):
+        view.resize(900, 320)
+        view.show()
+        app.processEvents()
+        table = view.table
+        header = table.horizontalHeader()
+        for column in (3, 4):
+            if table.isColumnHidden(column):
+                continue
+            assert table.columnWidth(column) >= header.sectionSizeHint(column), (
+                type(view).__name__,
+                column,
+            )
+        assert table.horizontalScrollBar().maximum() == 0
+        view.close()
+    app.processEvents()
+
+
+def test_window_minimum_is_capped_to_the_available_desktop(app: QApplication, tmp_path: Path):
+    window = make_window(tmp_path)
+    ideal = window._ideal_minimum_size()
+    left_need, right_need = window._panel_minimums
+
+    small = QSize(1024, 600)
+    assert window._minimum_for(small) == QSize(min(ideal.width(), 1024), min(ideal.height(), 600))
+    window._apply_minimum_size(small)
+    assert window.minimumWidth() <= 1024
+    assert window.minimumHeight() <= 600
+    # The splitter gives the space back instead of pushing the window off-screen.
+    assert window.left_panel.minimumWidth() <= left_need
+    assert window.right_panel.minimumWidth() <= right_need
+    assert window.left_panel.minimumWidth() + window.right_panel.minimumWidth() < left_need + right_need
+
+    window._apply_minimum_size(QSize(3840, 2160))
+    assert window.minimumWidth() == ideal.width()
+    assert window.left_panel.minimumWidth() == left_need
+    assert window.right_panel.minimumWidth() == right_need
+    window.close()
+    app.processEvents()
+
+
+def test_session_policy_chips_wrap_instead_of_disappearing(app: QApplication):
+    from src.ui.main_window import SessionPanel
+
+    panel = SessionPanel()
+    panel.show()
+    app.processEvents()
+    row = panel.chip_row
+    assert row.chip_count() == 5
+
+    panel.resize(1100, 600)
+    app.processEvents()
+    single_row = row.minimumHeight()
+    panel.resize(320, 600)
+    app.processEvents()
+    wrapped = row.minimumHeight()
+    assert single_row > 0
+    assert wrapped > single_row
+    panel.close()
+    app.processEvents()
 
 
 def test_redundant_album_is_hidden(app: QApplication):

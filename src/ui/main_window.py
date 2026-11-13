@@ -7,7 +7,7 @@ import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QRectF, Qt, QTimer, QUrl
+from PySide6.QtCore import QEvent, QRectF, QSize, Qt, QTimer, QUrl
 from PySide6.QtGui import (
     QBrush,
     QCloseEvent,
@@ -63,7 +63,7 @@ from ..core.telemetry import TelemetrySnapshot
 from .icons import logo_path
 from .qt_bridge import QtBridge
 from .theme import PALETTE, alpha, attach_fade
-from .widgets.base import Card, Chip, ElidedLabel, IconButton, InfoRow, SectionLabel
+from .widgets.base import Card, Chip, ChipRow, ElidedLabel, IconButton, InfoRow, SectionLabel
 from .widgets.badge import BitPerfectBadge, StatusPill
 from .widgets.device_panel import DevicePanel
 from .widgets.library_view import LibraryView
@@ -248,8 +248,10 @@ class SessionPanel(QWidget):
         text.setWordWrap(True)
         text.setObjectName("Hint")
         policy.body.addWidget(text)
-        # The paragraph above already lists every guarantee: a second row of
-        # chips repeating them only widened the pane and duplicated the data.
+        self.chip_row = ChipRow()
+        for label in ("SIN GANANCIA", "SIN LIMITADOR", "SIN EQ", "SIN REMUESTREO", "SIN TRAMADO"):
+            self.chip_row.add_chip(label)
+        policy.body.addWidget(self.chip_row)
         layout.addWidget(policy)
         layout.addStretch(1)
 
@@ -358,6 +360,7 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(920, 620)
         self.setAcceptDrops(True)
         self._minimum_size_final = False
+        self._screen_hooked = False
         self._build_ui()
         self._apply_minimum_size()
         self._connect_bridge()
@@ -471,8 +474,12 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.tabs, 1)
         # A splitter shrinks its children below their own layout hints, which
         # clips buttons: pin each panel to what it actually needs.
-        left.setMinimumWidth(max(400, left.minimumSizeHint().width()))
-        right.setMinimumWidth(max(330, right.minimumSizeHint().width()))
+        self._panel_minimums = (
+            max(400, left.minimumSizeHint().width()),
+            max(330, right.minimumSizeHint().width()),
+        )
+        left.setMinimumWidth(self._panel_minimums[0])
+        right.setMinimumWidth(self._panel_minimums[1])
         self.left_panel = left
         self.right_panel = right
         self.splitter = splitter
@@ -487,22 +494,66 @@ class MainWindow(QMainWindow):
         self.footer = FooterStrip()
         root_layout.addWidget(self.footer)
 
-    def _apply_minimum_size(self) -> None:
-        """Keep the window at least as wide as the header and both panels need."""
-
+    def _splitter_room(self) -> int:
         content = self.centralWidget().layout().itemAt(1).widget()
         margins = content.layout().contentsMargins()
-        panels = (
-            self.left_panel.minimumWidth()
-            + self.right_panel.minimumWidth()
-            + self.splitter.handleWidth()
-        )
+        return self.splitter.handleWidth() + margins.left() + margins.right()
+
+    def _ideal_minimum_size(self) -> QSize:
+        """What the header and both panels need with every control legible."""
+
+        left, right = self._panel_minimums
         width = max(
             920,
-            panels + margins.left() + margins.right(),
+            left + right + self._splitter_room(),
             self.header.minimumSizeHint().width(),
         )
-        self.setMinimumWidth(max(self.minimumWidth(), width))
+        return QSize(width, 620)
+
+    def _minimum_for(self, available: QSize) -> QSize:
+        """Ideal minimum, capped by the usable desktop."""
+
+        ideal = self._ideal_minimum_size()
+        return QSize(min(ideal.width(), available.width()), min(ideal.height(), available.height()))
+
+    def _apply_minimum_size(self, available: Optional[QSize] = None) -> None:
+        """Fit the layout minimum inside the desktop instead of off-screen.
+
+        On a 150 % scaled laptop the two panels can need more width than the
+        screen offers. In that case the window is capped to the desktop and the
+        splitter gives space back, so nothing is pushed out of reach.
+        """
+
+        if available is None:
+            screen = self.screen()
+            if screen is not None:
+                geometry = screen.availableGeometry()
+                available = QSize(geometry.width(), geometry.height())
+        ideal = self._ideal_minimum_size()
+        if available is None or available.width() <= 0 or available.height() <= 0:
+            self.setMinimumSize(ideal)
+            return
+        target = self._minimum_for(available)
+        left_need, right_need = self._panel_minimums
+        if target.width() < ideal.width():
+            budget = max(0, target.width() - self._splitter_room())
+            right = max(280, min(right_need, budget * 45 // 100))
+            left = max(300, min(left_need, budget - right))
+        else:
+            left, right = left_need, right_need
+        # Only touch the layout when something actually changes: this runs on
+        # every screen and font change.
+        if self.left_panel.minimumWidth() != left:
+            self.left_panel.setMinimumWidth(left)
+        if self.right_panel.minimumWidth() != right:
+            self.right_panel.setMinimumWidth(right)
+        size = QSize(max(320, target.width()), max(320, target.height()))
+        if size != self.minimumSize():
+            self.setMinimumSize(size)
+
+    def _on_screen_changed(self, _screen=None) -> None:
+        # Moving the window to another monitor must re-fit the minimum.
+        self._apply_minimum_size()
 
     def showEvent(self, event) -> None:  # type: ignore[override]
         super().showEvent(event)
@@ -510,6 +561,16 @@ class MainWindow(QMainWindow):
             # Font metrics are final only after the first polish pass.
             self._minimum_size_final = True
             self._apply_minimum_size()
+            handle = self.windowHandle()
+            if handle is not None and not self._screen_hooked:
+                handle.screenChanged.connect(self._on_screen_changed)
+                self._screen_hooked = True
+
+    def changeEvent(self, event) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange and getattr(self, "_minimum_size_final", False):
+            if hasattr(self, "_panel_minimums"):
+                self._apply_minimum_size()
 
     def _build_header(self) -> QWidget:
         header = QFrame()

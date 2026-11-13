@@ -2,19 +2,31 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import List, Optional
 
 from PySide6.QtCore import (
     Property,
     QAbstractAnimation,
     QEasingCurve,
+    QPoint,
     QPropertyAnimation,
+    QRect,
     QRectF,
     QSize,
     Qt,
 )
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter
-from PySide6.QtWidgets import QAbstractButton, QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import (
+    QAbstractButton,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QLayoutItem,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from ..icons import paint_icon
 from ..theme import PALETTE, mix
@@ -259,6 +271,103 @@ class Separator(QFrame):
             self.setFixedWidth(1)
         else:
             self.setFixedHeight(1)
+
+
+class FlowLayout(QLayout):
+    """Left-to-right layout that wraps onto a new line when space runs out."""
+
+    def __init__(self, parent: Optional[QWidget] = None, spacing: int = 6) -> None:
+        super().__init__(parent)
+        self._items: List[QLayoutItem] = []
+        self.setContentsMargins(0, 0, 0, 0)
+        self.setSpacing(spacing)
+
+    def addItem(self, item: QLayoutItem) -> None:  # type: ignore[override]
+        self._items.append(item)
+
+    def count(self) -> int:  # type: ignore[override]
+        return len(self._items)
+
+    def itemAt(self, index: int) -> Optional[QLayoutItem]:  # type: ignore[override]
+        if 0 <= index < len(self._items):
+            return self._items[index]
+        return None
+
+    def takeAt(self, index: int) -> Optional[QLayoutItem]:  # type: ignore[override]
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self) -> Qt.Orientation:  # type: ignore[override]
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:  # type: ignore[override]
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # type: ignore[override]
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect: QRect) -> None:  # type: ignore[override]
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self) -> QSize:  # type: ignore[override]
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:  # type: ignore[override]
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        margins = self.contentsMargins()
+        return size + QSize(margins.left() + margins.right(), margins.top() + margins.bottom())
+
+    def _do_layout(self, rect: QRect, test_only: bool) -> int:
+        margins = self.contentsMargins()
+        area = rect.adjusted(margins.left(), margins.top(), -margins.right(), -margins.bottom())
+        x, y = area.x(), area.y()
+        line_height = 0
+        spacing = self.spacing()
+        for item in self._items:
+            hint = item.sizeHint()
+            next_x = x + hint.width() + spacing
+            if next_x - spacing > area.right() and line_height > 0:
+                x = area.x()
+                y += line_height + spacing
+                next_x = x + hint.width() + spacing
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), hint))
+            x = next_x
+            line_height = max(line_height, hint.height())
+        return y + line_height - rect.y() + margins.bottom()
+
+
+class ChipRow(QWidget):
+    """A row of chips that wraps and keeps the height it actually needs."""
+
+    def __init__(self, parent: Optional[QWidget] = None, spacing: int = 6) -> None:
+        super().__init__(parent)
+        self._flow = FlowLayout(self, spacing=spacing)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Minimum)
+
+    def add_chip(self, text: str, variant: str = "accent") -> "Chip":
+        chip = Chip(text, variant)
+        self._flow.addWidget(chip)
+        self._sync_height()
+        return chip
+
+    def chip_count(self) -> int:
+        return self._flow.count()
+
+    def resizeEvent(self, event) -> None:  # type: ignore[override]
+        super().resizeEvent(event)
+        self._sync_height()
+
+    def _sync_height(self) -> None:
+        needed = self._flow.heightForWidth(max(1, self.width()))
+        if needed != self.minimumHeight():
+            self.setMinimumHeight(needed)
+            self.updateGeometry()
 
 
 class InfoRow(QWidget):
