@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   PYTHON_VERSION: "3.15.2"
@@ -100,11 +100,18 @@ jobs:
         run: |
           $url = "https://www.python.org/ftp/python/3.15.2/python-3.15.2-amd64.exe"
           $installer = Join-Path $env:RUNNER_TEMP "python-3.15.2-amd64.exe"
+          Write-Host "downloading $url"
           Invoke-WebRequest -Uri $url -OutFile $installer -UseBasicParsing
           Start-Process -FilePath $installer -ArgumentList "/quiet InstallAllUsers=1 PrependPath=1 Include_test=0 Include_launcher=1" -Wait
           $pythonRoot = "C:\Program Files\Python315"
+          if (-not (Test-Path $pythonRoot)) { throw "Python 3.15 installation failed" }
           Add-Content -Path $env:GITHUB_PATH -Value $pythonRoot
           Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $pythonRoot "Scripts")
+
+      - name: Verify interpreter
+        run: |
+          python --version
+          python -c "import sys; assert sys.version_info[:3] == (3, 15, 2), sys.version; print('Python 3.15.2 confirmed')"
 
       - name: Install dependencies
         run: |
@@ -112,8 +119,16 @@ jobs:
           python -m pip install -r requirements-dev.txt
 
       - name: Fetch native audio binaries (libsndfile, ffmpeg)
-        continue-on-error: true
-        run: python setup_env.py --install-native
+        run: |
+          python setup_env.py --install-native
+          if ($LASTEXITCODE -ne 0) { throw "setup_env --install-native failed with $LASTEXITCODE" }
+          # Fail loudly if any required native binary is missing: silently
+          # degrading here would ship an installer without ffmpeg.
+          foreach ($name in "libsndfile-1.dll", "ffmpeg.exe", "ffprobe.exe", "manifest.json") {
+            $path = Join-Path "resources\native" $name
+            if (-not (Test-Path $path)) { throw "missing native binary: $path" }
+          }
+          Write-Host "native binaries verified: libsndfile-1.dll, ffmpeg.exe, ffprobe.exe"
 
       - name: Render icon and export QSS
         run: |
@@ -129,23 +144,50 @@ jobs:
           if (-not (Test-Path $exe)) { throw "missing $exe" }
           $proc = Start-Process -FilePath $exe -ArgumentList "--diagnostics" -PassThru -Wait -NoNewWindow
           if ($proc.ExitCode -ne 0) { throw "frozen diagnostics failed with $($proc.ExitCode)" }
+          # The packaged app must carry the native decoders, not merely run.
+          foreach ($name in "libsndfile-1.dll", "ffmpeg.exe", "ffprobe.exe") {
+            $path = Join-Path "dist\TrueHQAudio\_internal\resources\native" $name
+            if (-not (Test-Path $path)) { throw "frozen app is missing $name" }
+          }
+
+      - name: Resolve app version
+        id: version
+        run: |
+          $match = Select-String -Path src\config.py -Pattern '^\s*APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
+          if (-not $match) { throw "APP_VERSION not found in src\config.py" }
+          $version = $match.Matches[0].Groups[1].Value
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw "unexpected APP_VERSION format: $version" }
+          Write-Host "APP_VERSION=$version"
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Build portable archive
         run: |
-          $version = (Select-String -Path src\config.py -Pattern '^APP_VERSION' | Select-Object -First 1).Line.Split('=')[1].Trim().Trim('"')
-          $target = "dist\TrueHQAudio-$version-portable-x64.zip"
-          Compress-Archive -Path dist\TrueHQAudio\* -DestinationPath $target -CompressionLevel Optimal
+          $target = Join-Path (Resolve-Path "dist") "TrueHQAudio-${{ steps.version.outputs.version }}-portable-x64.zip"
+          if (Test-Path $target) { Remove-Item $target }
+          # ZipFile streams and includes hidden files; Compress-Archive's '*'
+          # glob silently drops hidden entries and caps individual entries.
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          [System.IO.Compression.ZipFile]::CreateFromDirectory(
+            (Join-Path (Resolve-Path "dist") "TrueHQAudio"),
+            $target,
+            [System.IO.Compression.CompressionLevel]::Optimal,
+            $false)
           Write-Host "created $target"
 
       - name: Install Inno Setup
-        run: choco install innosetup --yes --no-progress
+        # Pinned: the .iss relies on Inno Setup 6.x directives and its default
+        # install path; verify-ISCC below would fail loudly on any drift.
+        run: choco upgrade innosetup --version=6.7.1 --allow-downgrade --yes --no-progress
 
       - name: Compile the installer
         run: |
-          $version = (Select-String -Path src\config.py -Pattern '^APP_VERSION' | Select-Object -First 1).Line.Split('=')[1].Trim().Trim('"')
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { throw "ISCC not found" }
-          & $iscc "/DAppVersion=$version" "installer\truehqaudio.iss"
+          $candidates = @(
+            "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+            "C:\Program Files\Inno Setup 6\ISCC.exe"
+          )
+          $iscc = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $iscc) { throw "ISCC not found after installing Inno Setup 6.7.1" }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "installer\truehqaudio.iss"
           if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed with $LASTEXITCODE" }
           Get-ChildItem installer\Output\*.exe | ForEach-Object { Write-Host "installer: $($_.FullName)" }
 
@@ -172,8 +214,24 @@ jobs:
             dist/SHA256SUMS.txt
             installer/Output/*.exe
 
+  # ------------------------------------------------------------------ release
+  release:
+    name: Publish release
+    needs: package
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    # contents: write is scoped to this job only; test/package build and upload
+    # artifacts with read access, including on pull requests.
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: TrueHQAudio-windows-x64
+          path: release-assets
+
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           name: True HQ Audio ${{ github.ref_name }}
@@ -181,6 +239,6 @@ jobs:
           prerelease: false
           generate_release_notes: true
           files: |
-            dist/*.zip
-            dist/SHA256SUMS.txt
-            installer/Output/*.exe
+            release-assets/**/*.zip
+            release-assets/**/SHA256SUMS.txt
+            release-assets/**/*.exe

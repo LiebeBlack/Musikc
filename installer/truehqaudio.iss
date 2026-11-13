@@ -41,9 +41,14 @@ SetupIconFile={#IconFile}
 UninstallDisplayIcon={app}\{#AppExeName}
 UninstallDisplayName={#AppName} {#AppVersion}
 LicenseFile=LICENSE.txt
-Compression=lzma2/ultra64
+{ lzma2/max keeps compile times sane on a ~450 MB payload; ultra64 was far }
+{ too slow on CI for a negligible ratio gain.  LZMAUseSeparateProcess runs   }
+{ LZMA in a native 64-bit process so a 32-bit ISCC.exe never hits its ~2 GB  }
+{ address-space ceiling while compressing.                                  }
+Compression=lzma2/max
 SolidCompression=yes
-LZMANumBlockThreads=4
+LZMANumBlockThreads=2
+LZMAUseSeparateProcess=yes
 WizardStyle=modern
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible

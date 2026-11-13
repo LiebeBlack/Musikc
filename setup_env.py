@@ -51,12 +51,17 @@ USER_AGENT = "TrueHQAudio-Setup/1.0 (+https://truehq.audio)"
 LIBSNDFILE_URLS = (
     "https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2-windows-x64.zip",
     "https://github.com/libsndfile/libsndfile/releases/download/1.2.2/libsndfile-1.2.2-win64.zip",
-    "https://github.com/libsndfile/libsndfile/releases/latest/download/libsndfile-1.2.2-windows-x64.zip",
 )
 
+# Pinned on purpose: every URL below points to an immutable release asset so a
+# rebuild always ships the same ffmpeg.  Never use "latest"/"release" aliases
+# here -- an upstream re-roll can silently break or degrade the installer.
+# FFmpeg 8.1 branch build (n8.1.3-35-gf1acb0a266) from the 2026-11-13 autobuild.
 FFMPEG_URLS = (
-    "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip",
-    "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip",
+    "https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-11-13-12-43/ffmpeg-n8.1.3-35-gf1acb0a266-win64-gpl-8.1.zip",
+    # Same immutable asset via the old repository name (301 redirect kept for
+    # proxies that cache the historic BtbN URLs).
+    "https://github.com/BtbN/FFmpeg-Builds/releases/download/autobuild-2026-11-13-12-43/ffmpeg-n8.1.3-35-gf1acb0a266-win64-gpl-8.1.zip",
 )
 
 DOWNLOAD_TIMEOUT = 120
@@ -291,7 +296,17 @@ def vendor_libsndfile_from_soundfile() -> Optional[Path]:
     if result.returncode != 0:
         CONSOLE.info("installing the soundfile wheel as a DLL source")
         run(
-            [python, "-m", "pip", "install", "--disable-pip-version-check", "--no-input", "soundfile>=0.13"],
+            [
+                python,
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                "--no-input",
+                # Pinned: this wheel is only a DLL source for libsndfile; keep
+                # the vendored binary reproducible across builds.
+                "soundfile==0.14.0",
+            ],
             "installing soundfile",
             check=False,
         )

@@ -81,6 +81,30 @@ a = Analysis(
 )
 pyz = PYZ(a.pure)
 
+# The sounddevice wheel ships every portaudio build it supports (macOS, 32-bit
+# x86, arm64).  On Windows x64 sounddevice only ever loads libportaudio64bit.dll
+# -- or libportaudio64bit-asio.dll when SD_ENABLE_ASIO is set -- so drop the
+# rest before COLLECT; they only bloat the installer and the portable archive.
+_PORTAUDIO_KEEP = {
+    "libportaudio64bit.dll",
+    "libportaudio64bit-asio.dll",
+    "README.md",  # attribution/license notes shipped by the portaudio project
+}
+
+
+def _prune_foreign_portaudio(toc):
+    kept = []
+    for entry in toc:
+        dest = entry[0].replace("\\", "/")
+        if "portaudio-binaries" in dest and Path(dest).name not in _PORTAUDIO_KEEP:
+            continue
+        kept.append(entry)
+    return kept
+
+
+a.datas = _prune_foreign_portaudio(a.datas)
+a.binaries = _prune_foreign_portaudio(a.binaries)
+
 exe = EXE(
     pyz,
     a.scripts,
