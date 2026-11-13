@@ -83,24 +83,43 @@ def _installed_families() -> Optional[set]:
         return None
 
 
+# Resolving a family means walking QFontDatabase.families(), which is far too
+# expensive to repeat per stylesheet build or per font change.
+_FAMILY_CACHE: Dict[str, str] = {}
+
+
 def resolve_font_family(candidates: Iterable[str] = FONT_STACK) -> str:
     available = _installed_families()
     if available is None:
         return candidates[0] if isinstance(candidates, tuple) else "Segoe UI"
+    key = "|".join(candidates)
+    cached = _FAMILY_CACHE.get(key)
+    if cached is not None:
+        return cached
+    resolved = "Sans Serif"
     for family in candidates:
         if family in available:
-            return family
-    return "Sans Serif"
+            resolved = family
+            break
+    _FAMILY_CACHE[key] = resolved
+    return resolved
 
 
 def resolve_mono_family() -> str:
     available = _installed_families()
     if available is None:
         return MONO_STACK[0]
+    key = f"mono:{'|'.join(MONO_STACK)}"
+    cached = _FAMILY_CACHE.get(key)
+    if cached is not None:
+        return cached
+    resolved = "Courier New"
     for family in MONO_STACK:
         if family in available:
-            return family
-    return "Courier New"
+            resolved = family
+            break
+    _FAMILY_CACHE[key] = resolved
+    return resolved
 
 
 def build_stylesheet(palette: Palette = PALETTE) -> str:
@@ -161,6 +180,13 @@ def build_stylesheet(palette: Palette = PALETTE) -> str:
         font-size: 10px;
         letter-spacing: 2px;
         color: {palette.text_dim};
+    }}
+
+    QLabel#AppVersion {{
+        color: {palette.accent_dim};
+        font-family: "{resolve_mono_family()}";
+        font-size: 9px;
+        letter-spacing: 1px;
     }}
 
     QLabel#SectionTitle {{

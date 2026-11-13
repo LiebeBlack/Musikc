@@ -133,7 +133,8 @@ def test_telemetry_panel_update(app: QApplication) -> None:
     )
     pixmap = QPixmap(panel.size())
     panel.render(pixmap)
-    assert panel.clock_tile._value.text() == "192 kHz"
+    assert panel.buffer_state.text() == "ÓPTIMO"
+    assert panel.xrun_row._value.text().startswith("0")
 
 
 def test_library_model_and_view(app: QApplication) -> None:

@@ -207,12 +207,21 @@ def run(argv: Optional[List[str]] = None) -> int:
         os.environ.setdefault("QT_ENABLE_HIGHDPI_SCALING", "1")
         os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
         from PySide6.QtCore import Qt, QTimer
+        from PySide6.QtGui import QGuiApplication
         from PySide6.QtWidgets import QApplication
 
         from .ui.main_window import MainWindow, build_app_icon
         from .ui.qt_bridge import QtBridge
         from .ui.theme import apply_theme
 
+        # Fractional scaling (125 %, 150 % …) must render exactly instead of
+        # being rounded to the nearest integer factor.
+        try:
+            QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+            )
+        except (AttributeError, ValueError):
+            pass
         QApplication.setAttribute(Qt.ApplicationAttribute.AA_ShareOpenGLContexts, True)
         app = QApplication(arguments)
         app.setApplicationName(APP_NAME)

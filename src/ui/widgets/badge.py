@@ -10,7 +10,17 @@ from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Property, QAbstractAnimation, QEasingCurve, QPointF, QPropertyAnimation, QRectF, QSize, Qt
+from PySide6.QtCore import (
+    Property,
+    QAbstractAnimation,
+    QEasingCurve,
+    QEvent,
+    QPointF,
+    QPropertyAnimation,
+    QRectF,
+    QSize,
+    Qt,
+)
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -27,9 +37,9 @@ STATE_COLORS = {
 STATE_LABELS = {
     "active": "BIT-PERFECT",
     "dop": "BIT-PERFECT · DoP",
-    "degraded": "NOT BIT-PERFECT",
-    "off": "ENGINE IDLE",
-    "error": "STREAM ERROR",
+    "degraded": "NO BIT-PERFECT",
+    "off": "MOTOR EN ESPERA",
+    "error": "ERROR DE AUDIO",
 }
 
 
@@ -39,14 +49,21 @@ class BitPerfectBadge(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._state = "off"
-        self._reason = "engine idle"
+        self._reason = "motor en espera"
         self._pulse = 0.0
         self._glow = 0.0
+        self._font = QFont()
+        self._font_ready = False
+        self._text_width = 0.0
+        self._width_state = ""
+        # The badge keeps one width for every verdict so the header never
+        # reflows when the state changes; the pill itself stays text-tight.
+        self._reserved_width = 0.0
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(34)
         self.setMinimumWidth(178)
         self.setCursor(Qt.CursorShape.WhatsThisCursor)
-        self.setToolTip("Bit-perfect status")
+        self.setToolTip("Estado bit-perfect")
 
         self._pulse_animation = QPropertyAnimation(self, b"pulse", self)
         self._pulse_animation.setDuration(2400)
@@ -91,9 +108,14 @@ class BitPerfectBadge(QWidget):
 
     def set_state(self, state: str, reason: str = "") -> None:
         state = state if state in STATE_COLORS else "off"
+        reason = reason or STATE_LABELS.get(state, "")
+        if state == self._state and reason == self._reason:
+            # The window polls the engine several times per second: an unchanged
+            # verdict must not touch the tooltip, the animations or the painter.
+            return
         changed = state != self._state
         self._state = state
-        self._reason = reason or STATE_LABELS.get(state, "")
+        self._reason = reason
         self._refresh_tooltip()
         if changed:
             self._glow_animation.stop()
@@ -109,31 +131,66 @@ class BitPerfectBadge(QWidget):
         self.update()
 
     def _refresh_tooltip(self) -> None:
-        label = STATE_LABELS.get(self._state, "UNKNOWN")
+        label = STATE_LABELS.get(self._state, "DESCONOCIDO")
         self.setToolTip(f"{label}\n{self._reason}" if self._reason else label)
 
     def sizeHint(self) -> QSize:  # type: ignore[override]
-        metrics = QFontMetrics(self._label_font())
-        width = metrics.horizontalAdvance(STATE_LABELS.get(self._state, "")) + 58
-        return QSize(max(178, width), 34)
+        self._ensure_label_metrics()
+        return QSize(max(178, int(self._reserved_width)), 34)
 
-    def _label_font(self) -> QFont:
-        font = QFont(self.font())
-        font.setPointSizeF(8.4)
-        font.setWeight(QFont.Weight.Bold)
-        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.4)
-        return font
+    def _apply_reserved_width(self) -> None:
+        """Pin the widget width so the header cannot reflow between verdicts."""
+
+        self._ensure_label_metrics()
+        width = max(178, int(self._reserved_width))
+        if self.minimumWidth() != width or self.maximumWidth() != width:
+            self.setFixedWidth(width)
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        self._apply_reserved_width()
+
+    def _ensure_label_metrics(self) -> None:
+        """Resolve the badge font and label width once, not on every frame.
+
+        The badge breathes at 60 FPS while the stream is exact, so the paint
+        path must not build a QFont or a QFontMetrics per call.
+        """
+
+        if not self._font_ready:
+            font = QFont(self.font())
+            font.setPointSizeF(8.4)
+            font.setWeight(QFont.Weight.Bold)
+            font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.4)
+            self._font = font
+            self._font_ready = True
+            self._width_state = ""
+            metrics = QFontMetrics(font)
+            widest = max(metrics.horizontalAdvance(label) for label in STATE_LABELS.values())
+            self._reserved_width = float(widest + 58)
+        if self._width_state != self._state:
+            metrics = QFontMetrics(self._font)
+            self._text_width = float(metrics.horizontalAdvance(STATE_LABELS.get(self._state, "")))
+            self._width_state = self._state
+
+    def changeEvent(self, event) -> None:  # type: ignore[override]
+        super().changeEvent(event)
+        if event.type() == QEvent.Type.FontChange:
+            self._font_ready = False
+            self._width_state = ""
+            self._apply_reserved_width()
 
     def paintEvent(self, event) -> None:  # type: ignore[override]
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         color = QColor(STATE_COLORS.get(self._state, PALETTE.text_dim))
         label = STATE_LABELS.get(self._state, "")
-        font = self._label_font()
-        metrics = QFontMetrics(font)
-        text_width = metrics.horizontalAdvance(label)
+        self._ensure_label_metrics()
+        font = self._font
+        text_width = self._text_width
         pill_width = min(self.width(), text_width + 58)
-        rect = QRectF(2.0, 2.0, pill_width - 4.0, self.height() - 4.0)
+        pill_left = (self.width() - pill_width) / 2.0
+        rect = QRectF(pill_left + 2.0, 2.0, pill_width - 4.0, self.height() - 4.0)
 
         breathing = 0.5 + 0.5 * self._pulse if self._pulse_animation.state() == QAbstractAnimation.State.Running else 0.0
         halo = QColor(color)

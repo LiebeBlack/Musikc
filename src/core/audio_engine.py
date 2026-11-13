@@ -64,8 +64,15 @@ DEFAULT_TARGET_FILL_MS = 900
 MIN_RING_BYTES = 1 << 16
 MAX_RING_BYTES = 96 << 20
 SUPERVISOR_TICK = 0.05
-HOUSEKEEPING_INTERVAL = 0.20
-DEVICE_POLL_INTERVAL = 1.20
+# Telemetry is published quickly only while a stream is live; an idle engine
+# costs one wake-up per second instead of five.
+TELEMETRY_INTERVAL_ACTIVE = 0.20
+TELEMETRY_INTERVAL_IDLE = 1.00
+# Re-hashing the session is not a per-frame task: the verdict is reused for a
+# full second and recomputed immediately on every forced publication.
+INTEGRITY_REFRESH = 1.00
+INTEGRITY_EVENT_INTERVAL = 1.00
+DEVICE_POLL_INTERVAL = 2.00
 XRUN_EVENT_THROTTLE = 1.0
 
 
@@ -165,7 +172,7 @@ class AudioEngine:
         self._source_format: Optional[AudioFormat] = None
         self._target_format: Optional[AudioFormat] = None
         self._dop_encoder: Optional[DopEncoder] = None
-        self._integrity = IntegrityMonitor()
+        self._new_integrity()
         self._stream_dtype = ""
         self._effective_exclusive = bool((config or EngineConfig()).exclusive)
 
@@ -194,7 +201,9 @@ class AudioEngine:
         self._signature: Tuple[str, ...] = ()
         self._started_at = time.monotonic()
         self._pending_autoplay = False
-        self._report_dirty = False
+        self._report_cache: Optional[IntegrityReport] = None
+        self._report_stamp = 0.0
+        self._last_integrity_event = 0.0
 
     # ------------------------------------------------------------------ setup
     def start(self) -> None:
@@ -267,6 +276,23 @@ class AudioEngine:
 
     def integrity_report(self) -> IntegrityReport:
         return self._integrity.report()
+
+    def _new_integrity(self) -> None:
+        """Start a clean accounting session and drop the cached verdict."""
+
+        self._integrity = IntegrityMonitor()
+        self._report_cache = None
+        self._report_stamp = 0.0
+
+    def _cached_report(self, force: bool = False) -> IntegrityReport:
+        """Reuse the digest/verdict pair for one second between publications."""
+
+        now = time.monotonic()
+        if not force and self._report_cache is not None and now - self._report_stamp < INTEGRITY_REFRESH:
+            return self._report_cache
+        self._report_cache = self._integrity.report()
+        self._report_stamp = now
+        return self._report_cache
 
     def status(self) -> EngineStatus:
         snapshot = self._telemetry.snapshot()
@@ -478,7 +504,7 @@ class AudioEngine:
         self._eof = False
         self._eof_action = "drain"
         self._dop_encoder = DopEncoder(info.dsd_format) if info.dsd_format else None
-        self._integrity = IntegrityMonitor()
+        self._new_integrity()
         if self._target_format is not None and self._stream is not None:
             self._integrity.begin(
                 self._source_format,
@@ -541,7 +567,7 @@ class AudioEngine:
                 self._ring.drain()
             if self._dop_encoder is not None:
                 self._dop_encoder.reset()
-            self._integrity = IntegrityMonitor()
+            self._new_integrity()
             if self._target_format is not None and self._source_format is not None:
                 self._integrity.begin(
                     self._source_format,
@@ -627,7 +653,7 @@ class AudioEngine:
         self._frames_sent = 0
         self._eof = False
         self._suppress_xrun = True
-        self._integrity = IntegrityMonitor()
+        self._new_integrity()
         if self._target_format is not None and self._source_format is not None:
             self._integrity.begin(
                 self._source_format,
@@ -814,7 +840,7 @@ class AudioEngine:
         self._silence_frames = 0
         self._overruns = 0
         self._callback_priority_ready = False
-        self._integrity = IntegrityMonitor()
+        self._new_integrity()
         self._integrity.begin(
             source_transport,
             self._target_format,
@@ -1209,7 +1235,9 @@ class AudioEngine:
         if now - self._last_device_poll >= DEVICE_POLL_INTERVAL:
             self._last_device_poll = now
             self._poll_devices()
-        if now - self._last_housekeeping >= HOUSEKEEPING_INTERVAL:
+        live = self._state in (EngineState.PLAYING, EngineState.OPENING, EngineState.DRAINING)
+        interval = TELEMETRY_INTERVAL_ACTIVE if live else TELEMETRY_INTERVAL_IDLE
+        if now - self._last_housekeeping >= interval:
             self._last_housekeeping = now
             self._publish_telemetry()
 
@@ -1337,7 +1365,7 @@ class AudioEngine:
             capacity_ms = ring.capacity_bytes / (target.bytes_per_second / 1000.0)
         priority = current_priority_state()
         bit_perfect, reason = self._evaluate_bit_perfect(position_seconds)
-        report = self._integrity.report()
+        report = self._cached_report(force=force)
         source = info.transport_format if info is not None else None
         snapshot = TelemetrySnapshot(
             state=self._state.value,
@@ -1396,7 +1424,14 @@ class AudioEngine:
         )
         self._telemetry.observe(snapshot)
         self._telemetry.maybe_log(force=force)
-        if report.started and self._state in (EngineState.PLAYING, EngineState.PAUSED):
+        live_verdict = self._state in (EngineState.PLAYING, EngineState.PAUSED)
+        now = time.monotonic()
+        if (
+            report.started
+            and live_verdict
+            and (force or now - self._last_integrity_event >= INTEGRITY_EVENT_INTERVAL)
+        ):
+            self._last_integrity_event = now
             self._bus.publish(
                 ENGINE_INTEGRITY,
                 verdict=report.verdict.value,

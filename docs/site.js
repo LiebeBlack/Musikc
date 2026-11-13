@@ -9,6 +9,24 @@
     document.querySelectorAll("[data-release-link]").forEach((link) => link.setAttribute("href", releaseUrl));
     document.querySelectorAll("[data-project-link]").forEach((link) => link.setAttribute("href", projectUrl));
     document.querySelectorAll("[data-license-link]").forEach((link) => link.setAttribute("href", `${projectUrl}/blob/main/LICENSE`));
+
+    // Documentation snippets stay repository-agnostic in the source: the
+    // owner/name is written here from the placeholder the deploy fills in.
+    const name = repository.split("/")[1] || repository;
+    document.querySelectorAll("[data-repository-slug]").forEach((node) => {
+      node.textContent = repository;
+    });
+    document.querySelectorAll("[data-repository-name]").forEach((node) => {
+      node.textContent = name;
+    });
+    document.querySelectorAll(".code-block").forEach((block) => {
+      const code = block.querySelector("code");
+      const button = block.querySelector("[data-copy]");
+      if (!code || !button || !block.querySelector("[data-repository-slug], [data-repository-name]")) {
+        return;
+      }
+      button.setAttribute("data-copy", code.textContent.trim());
+    });
   }
 
   const menuButton = document.querySelector(".menu-toggle");

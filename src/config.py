@@ -306,7 +306,7 @@ class AppSettings:
     window_height: int = 900
     window_maximised: bool = False
     library_folders: list[str] = field(default_factory=list)
-    telemetry_poll_ms: int = 120
+    telemetry_poll_ms: int = 200
     restore_last_track: bool = True
     last_track: str = ""
 

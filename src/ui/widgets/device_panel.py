@@ -1,20 +1,16 @@
-"""DAC selection, exclusive-mode negotiation and live capability probing."""
+"""DAC clock probing and negotiated transport parameters.
+
+The output device is chosen once, from the window header, so this panel only
+covers what cannot be seen anywhere else: the clocks the driver really accepts,
+the DSD-over-PCM rates and the negotiated transport facts.
+"""
 
 from __future__ import annotations
 
 from typing import List, Optional
 
 from PySide6.QtCore import QObject, QThread, Signal
-from PySide6.QtWidgets import (
-    QCheckBox,
-    QComboBox,
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ...config import get_logger, humanise_rate
 from ...core.devices import AudioBackendUnavailable, DeviceCapabilities, DeviceInfo, DeviceManager
@@ -22,14 +18,8 @@ from .base import Card, Chip, InfoRow, SectionLabel
 
 LOGGER = get_logger("ui.devices")
 
-HOST_FILTERS = (
-    ("all", "All drivers"),
-    ("asio", "ASIO"),
-    ("wasapi", "WASAPI"),
-    ("wdm-ks", "WDM-KS"),
-    ("directsound", "DirectSound"),
-    ("mme", "MME"),
-)
+PROBE_LABEL = "Detectar"
+PROBING_LABEL = "Detectando…"
 
 
 class CapabilityProbe(QThread):
@@ -57,17 +47,13 @@ class CapabilityProbe(QThread):
 
 
 class DevicePanel(QWidget):
-    """Panel with device selection, exclusive toggle and probed clocks."""
-
-    deviceChanged = Signal(int, bool)
-    exclusiveToggled = Signal(bool)
-    reprobeRequested = Signal()
+    """Probed clock matrix and negotiated parameters for the selected DAC."""
 
     def __init__(self, manager: DeviceManager, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._manager = manager
-        self._devices: List[DeviceInfo] = []
-        self._current: Optional[DeviceInfo] = None
+        self._device: Optional[DeviceInfo] = None
+        self._exclusive = True
         self._capabilities: Optional[DeviceCapabilities] = None
         self._probe_thread: Optional[CapabilityProbe] = None
         self._rate_chips: List[Chip] = []
@@ -76,62 +62,25 @@ class DevicePanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        selector = Card(spacing=10)
-        selector.body.setContentsMargins(16, 14, 16, 14)
-        selector.body.addWidget(SectionLabel("Output device"))
-
-        filter_row = QHBoxLayout()
-        filter_row.setContentsMargins(0, 0, 0, 0)
-        filter_row.setSpacing(8)
-        self.host_filter = QComboBox()
-        for key, label in HOST_FILTERS:
-            self.host_filter.addItem(label, key)
-        self.host_filter.currentIndexChanged.connect(self._rebuild_device_list)
-        filter_row.addWidget(self.host_filter, 1)
-        self.rescan_button = QPushButton("Rescan")
-        self.rescan_button.clicked.connect(self.refresh_devices)
-        filter_row.addWidget(self.rescan_button)
-        selector.body.addLayout(filter_row)
-
-        self.device_combo = QComboBox()
-        self.device_combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        self.device_combo.setMinimumContentsLength(26)
-        self.device_combo.currentIndexChanged.connect(self._on_device_changed)
-        selector.body.addWidget(self.device_combo)
-
-        mode_row = QHBoxLayout()
-        mode_row.setContentsMargins(0, 0, 0, 0)
-        self.exclusive_check = QCheckBox("Exclusive mode (bypass the OS mixer)")
-        self.exclusive_check.setChecked(True)
-        self.exclusive_check.toggled.connect(self._on_exclusive_toggled)
-        mode_row.addWidget(self.exclusive_check)
-        mode_row.addStretch(1)
-        selector.body.addLayout(mode_row)
-
-        self.driver_label = QLabel("")
-        self.driver_label.setObjectName("Hint")
-        self.driver_label.setWordWrap(True)
-        selector.body.addWidget(self.driver_label)
-
-        actions = QHBoxLayout()
-        actions.setContentsMargins(0, 0, 0, 0)
-        self.apply_button = QPushButton("Use this DAC")
-        self.apply_button.setObjectName("Primary")
-        self.apply_button.clicked.connect(self._emit_selection)
-        actions.addWidget(self.apply_button)
-        self.probe_button = QPushButton("Probe clocks")
-        self.probe_button.clicked.connect(self.probe_now)
-        actions.addWidget(self.probe_button)
-        selector.body.addLayout(actions)
-        layout.addWidget(selector)
-
         clock_card = Card(spacing=8)
         clock_card.body.setContentsMargins(16, 14, 16, 14)
-        clock_card.body.addWidget(SectionLabel("Native clocks reported by the driver"))
-        self.clock_summary = QLabel("Probe the DAC to enumerate its clocks.")
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(8)
+        header.addWidget(SectionLabel("Frecuencias nativas del DAC"))
+        header.addStretch(1)
+        self.probe_button = QPushButton(PROBE_LABEL)
+        self.probe_button.setObjectName("Primary")
+        self.probe_button.setToolTip("Detectar las frecuencias que acepta el DAC seleccionado")
+        self.probe_button.clicked.connect(self.probe_now)
+        header.addWidget(self.probe_button)
+        clock_card.body.addLayout(header)
+
+        self.clock_summary = QLabel("Elige la salida en la cabecera y detecta aquí las frecuencias que acepta.")
         self.clock_summary.setObjectName("Hint")
         self.clock_summary.setWordWrap(True)
         clock_card.body.addWidget(self.clock_summary)
+
         self.rate_container = QWidget()
         self.rate_layout = QGridLayout(self.rate_container)
         self.rate_layout.setContentsMargins(0, 2, 0, 0)
@@ -142,16 +91,17 @@ class DevicePanel(QWidget):
 
         facts = Card(spacing=4)
         facts.body.setContentsMargins(16, 14, 16, 14)
-        facts.body.addWidget(SectionLabel("Negotiation facts"))
+        facts.body.addWidget(SectionLabel("Parámetros negociados"))
         self.rows = {
-            "driver": InfoRow("Driver", "—"),
-            "channels": InfoRow("Output channels", "—"),
-            "default_rate": InfoRow("Default clock", "—"),
-            "max_rate": InfoRow("Probed maximum", "—"),
-            "max_depth": InfoRow("Probed depth", "—"),
-            "dop": InfoRow("DoP capable rates", "—"),
+            "driver": InfoRow("Controlador", "—"),
+            "path": InfoRow("Camino de salida", "—"),
+            "channels": InfoRow("Canales de salida", "—"),
+            "default_rate": InfoRow("Frecuencia predeterminada", "—"),
+            "max_rate": InfoRow("Frecuencia máxima", "—"),
+            "max_depth": InfoRow("Profundidad máxima", "—"),
+            "dop": InfoRow("Frecuencias DoP", "—"),
             "backend": InfoRow("PortAudio", "—"),
-            "errors": InfoRow("Driver notes", "—"),
+            "notes": InfoRow("Notas del controlador", "—"),
         }
         for row in self.rows.values():
             facts.body.addWidget(row)
@@ -160,96 +110,77 @@ class DevicePanel(QWidget):
 
         versions = manager.backend_versions()
         self.rows["backend"].set_value(f"{versions.get('portaudio', '?')} / sd {versions.get('sounddevice', '?')}")
-        self.refresh_devices()
 
     # -------------------------------------------------------------------- data
-    def refresh_devices(self) -> None:
-        try:
-            self._devices = self._manager.refresh(force=True)
-        except AudioBackendUnavailable as exc:
-            self._devices = []
-            self.device_combo.clear()
-            self.device_combo.addItem("No audio backend available", None)
-            self.driver_label.setText(str(exc))
-            return
-        self._rebuild_device_list()
+    def set_device(self, device: Optional[DeviceInfo]) -> None:
+        """Point the panel at the DAC selected in the header."""
 
-    def _rebuild_device_list(self) -> None:
-        selected_index = self._current.index if self._current else None
-        host_key = self.host_filter.currentData() or "all"
-        filtered = [device for device in self._devices if host_key == "all" or device.host_kind == host_key]
-        self.device_combo.blockSignals(True)
-        self.device_combo.clear()
-        for device in filtered:
-            label = f"{device.name}   ·   {device.driver_label}"
-            self.device_combo.addItem(label, device.index)
-        self.device_combo.blockSignals(False)
-        if not filtered:
-            self.device_combo.addItem("No output device for this driver", None)
-            self.driver_label.setText("Connect a DAC or pick another driver family.")
+        if device is None or (self._device is not None and device.index == self._device.index and device.name == self._device.name):
+            if device is None:
+                self._reset_facts()
             return
-        target_position = 0
-        for position, device in enumerate(filtered):
-            if selected_index is not None and device.index == selected_index:
-                target_position = position
-                break
-            if device.is_default_output and selected_index is None:
-                target_position = position
-        self.device_combo.setCurrentIndex(target_position)
-        self._on_device_changed(target_position)
-
-    def _on_device_changed(self, position: int) -> None:
-        index = self.device_combo.itemData(position)
-        self._current = next((device for device in self._devices if device.index == index), None)
+        self._device = device
         self._capabilities = None
-        if self._current is None:
-            return
-        device = self._current
-        exclusive_possible = device.exclusive_capable
-        self.exclusive_check.setEnabled(exclusive_possible)
-        if not exclusive_possible:
-            self.exclusive_check.setChecked(False)
+        self._clear_rate_chips()
+        self.probe_button.setEnabled(True)
+        self.probe_button.setText(PROBE_LABEL)
         self.rows["driver"].set_value(device.driver_label)
+        self.rows["path"].set_value(self._path_text(device))
         self.rows["channels"].set_value(f"{device.max_output_channels} ch")
-        self.rows["default_rate"].set_value(humanise_rate(int(device.default_samplerate)) if device.default_samplerate else "—")
+        self.rows["default_rate"].set_value(
+            humanise_rate(int(device.default_samplerate)) if device.default_samplerate else "—"
+        )
         self.rows["max_rate"].set_value("—")
         self.rows["max_depth"].set_value("—")
         self.rows["dop"].set_value("—")
-        self.rows["errors"].set_value("—")
-        self.clock_summary.setText("Probe the DAC to enumerate its clocks.")
-        self._clear_rate_chips()
-        if device.is_asio:
-            self.driver_label.setText(
-                "ASIO bypasses the Windows audio engine completely. Lowest latency and no OS volume stage."
-            )
-        elif device.is_wasapi:
-            self.driver_label.setText(
-                "WASAPI Exclusive locks the DAC clock; the Windows mixer is bypassed entirely."
-            )
-        elif exclusive_possible:
-            self.driver_label.setText("Kernel streaming bypasses the system mixer (WDM-KS).")
-        else:
-            self.driver_label.setText(
-                "This driver family shares the Windows mixer: it can resample the stream and is never bit-perfect."
-            )
+        self.rows["notes"].set_value("sin analizar")
+        self.clock_summary.setText("Detecta las frecuencias para ver la matriz completa del controlador.")
 
-    def _on_exclusive_toggled(self, checked: bool) -> None:
-        if self._current is not None and not checked and self._current.exclusive_capable:
-            self.driver_label.setText("Shared mode selected: the OS mixer may resample the signal.")
+    def set_exclusive(self, exclusive: bool) -> None:
+        exclusive = bool(exclusive)
+        if exclusive == self._exclusive:
+            return
+        self._exclusive = exclusive
+        self._capabilities = None
         self._clear_rate_chips()
-        self.clock_summary.setText("Probe the DAC to enumerate its clocks.")
-        self.exclusiveToggled.emit(bool(checked))
+        if self._device is not None:
+            self.rows["max_rate"].set_value("—")
+            self.rows["max_depth"].set_value("—")
+            self.rows["dop"].set_value("—")
+            self.rows["notes"].set_value("sin analizar")
+            self.clock_summary.setText("Detecta las frecuencias para ver la matriz completa del controlador.")
+
+    def _reset_facts(self) -> None:
+        self._device = None
+        self._capabilities = None
+        self._clear_rate_chips()
+        self.probe_button.setEnabled(False)
+        for row in self.rows.values():
+            row.set_value("—")
+        self.clock_summary.setText("No hay ningún DAC disponible para analizar.")
+        versions = self._manager.backend_versions()
+        self.rows["backend"].set_value(f"{versions.get('portaudio', '?')} / sd {versions.get('sounddevice', '?')}")
+
+    @staticmethod
+    def _path_text(device: DeviceInfo) -> str:
+        if device.is_asio:
+            return "ASIO: omite el motor de audio de Windows"
+        if device.is_wasapi:
+            return "WASAPI exclusivo: reloj del DAC, sin mezclador"
+        if device.host_kind == "wdm-ks":
+            return "WDM-KS: transmisión directa al núcleo"
+        return "Mezclador compartido de Windows: puede remuestrear"
 
     # ----------------------------------------------------------------- probing
     def probe_now(self) -> None:
-        if self._current is None:
+        if self._device is None:
             return
         if self._probe_thread is not None and self._probe_thread.isRunning():
             return
         self.probe_button.setEnabled(False)
-        self.probe_button.setText("Probing…")
-        self.rows["errors"].set_value("querying the driver")
-        thread = CapabilityProbe(self._manager, self._current, self.exclusive_check.isChecked(), self)
+        self.probe_button.setText(PROBING_LABEL)
+        self.rows["notes"].set_value("consultando el controlador")
+        thread = CapabilityProbe(self._manager, self._device, self._exclusive, self)
         thread.probed.connect(self._on_probed)
         thread.failed.connect(self._on_probe_failed)
         thread.finished.connect(self._on_probe_finished)
@@ -258,31 +189,30 @@ class DevicePanel(QWidget):
 
     def _on_probe_finished(self) -> None:
         self.probe_button.setEnabled(True)
-        self.probe_button.setText("Probe clocks")
+        self.probe_button.setText(PROBE_LABEL)
 
     def _on_probe_failed(self, device_index: int, message: str) -> None:
-        self.rows["errors"].set_value(message[:64])
-        self.clock_summary.setText("The driver rejected the capability query.")
+        self.rows["notes"].set_value(message[:64])
+        self.clock_summary.setText("El controlador rechazó la consulta de capacidades.")
         LOGGER.warning("capability probe failed", extra={"device_index": device_index, "error": message})
 
     def _on_probed(self, device_index: int, capabilities: DeviceCapabilities, exclusive: bool) -> None:
-        if self._current is None or self._current.index != device_index:
+        if self._device is None or self._device.index != device_index:
             return
         self._capabilities = capabilities
         if not capabilities.rates:
-            self.clock_summary.setText("The driver reported no usable clocks for this mode.")
+            self.clock_summary.setText("El controlador no informó de frecuencias utilizables en este modo.")
             return
         best_rate = capabilities.max_rate
-        summary = (
-            f"{len(capabilities.rates)} clocks accepted · maximum {humanise_rate(best_rate)} · "
-            f"up to {capabilities.max_bits} bit"
+        self.clock_summary.setText(
+            f"{len(capabilities.rates)} frecuencias aceptadas · máximo {humanise_rate(best_rate)} · "
+            f"hasta {capabilities.max_bits} bits"
         )
-        self.clock_summary.setText(summary)
         self.rows["max_rate"].set_value(humanise_rate(best_rate))
         self.rows["max_depth"].set_value(f"{capabilities.max_bits} bit")
-        (self.rows["errors"].set_value(" · ".join(capabilities.errors[:2]) if capabilities.errors else "clean"))
+        self.rows["notes"].set_value(" · ".join(capabilities.errors[:2]) if capabilities.errors else "sin errores")
         dop = capabilities.dop_capable_rates()
-        self.rows["dop"].set_value(", ".join(humanise_rate(rate) for rate in dop) if dop else "none")
+        self.rows["dop"].set_value(", ".join(humanise_rate(rate) for rate in dop) if dop else "ninguna")
         self._render_rate_chips(capabilities)
 
     def _clear_rate_chips(self) -> None:
@@ -307,30 +237,8 @@ class DevicePanel(QWidget):
             self._rate_chips.append(chip)
 
     # ------------------------------------------------------------------ actions
-    def _emit_selection(self) -> None:
-        if self._current is None:
-            return
-        self.deviceChanged.emit(self._current.index, self.exclusive_check.isChecked())
-
     def current_device(self) -> Optional[DeviceInfo]:
-        return self._current
-
-    def select_device(self, name: str, host_api: str = "") -> None:
-        device = self._manager.find_by_name(name, host_api)
-        if device is None:
-            return
-        for position in range(self.device_combo.count()):
-            if self.device_combo.itemData(position) == device.index:
-                self.device_combo.setCurrentIndex(position)
-                return
-        self.host_filter.setCurrentIndex(0)
-        for position in range(self.device_combo.count()):
-            if self.device_combo.itemData(position) == device.index:
-                self.device_combo.setCurrentIndex(position)
-                return
-
-    def set_exclusive(self, exclusive: bool) -> None:
-        self.exclusive_check.setChecked(bool(exclusive))
+        return self._device
 
     def shutdown(self, timeout_ms: int = 3000) -> None:
         """Wait for a running capability probe so Qt never destroys a live thread."""

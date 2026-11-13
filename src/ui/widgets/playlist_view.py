@@ -44,7 +44,7 @@ ROW_HEIGHT = 42
 
 
 class PlaylistTableModel(QAbstractTableModel):
-    COLUMNS = ("#", "TITLE", "ALBUM", "FORMAT", "TIME")
+    COLUMNS = ("#", "TÍTULO", "ÁLBUM", "FORMATO", "DURACIÓN")
 
     def __init__(self, playlist: Optional[Playlist] = None) -> None:
         super().__init__()
@@ -174,6 +174,23 @@ class PlaylistTableModel(QAbstractTableModel):
 class TrackDelegate(QStyledItemDelegate):
     """Draws a two line title cell and a subtle 'now playing' marker."""
 
+    def __init__(self, parent: Optional[QWidget] = None) -> None:
+        super().__init__(parent)
+        self._fonts: dict = {}
+
+    def _font(self, base: QFont, key: str, size: float, weight=None) -> QFont:
+        """Reuse resolved fonts: this delegate repaints on every hover move."""
+
+        cached = self._fonts.get(key)
+        if cached is None:
+            font = QFont(base)
+            font.setPointSizeF(size)
+            if weight is not None:
+                font.setWeight(weight)
+            self._fonts[key] = font
+            cached = font
+        return cached
+
     def sizeHint(self, option, index) -> QSize:  # type: ignore[override]
         return QSize(option.rect.width(), ROW_HEIGHT)
 
@@ -195,9 +212,7 @@ class TrackDelegate(QStyledItemDelegate):
             painter.drawRoundedRect(option.rect.adjusted(2, 2, -2, -2), 8, 8)
         if index.column() == 1:
             track = index.data(Qt.ItemDataRole.UserRole)
-            title_font = QFont(option.font)
-            title_font.setPointSizeF(10.0)
-            title_font.setWeight(QFont.Weight.DemiBold)
+            title_font = self._font(option.font, "title", 10.0, QFont.Weight.DemiBold)
             painter.setFont(title_font)
             painter.setPen(QColor(PALETTE.accent) if is_current else QColor(PALETTE.text))
             metrics = QFontMetrics(title_font)
@@ -207,8 +222,7 @@ class TrackDelegate(QStyledItemDelegate):
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 metrics.elidedText(str(index.data() or ""), Qt.TextElideMode.ElideRight, title_rect.width()),
             )
-            sub_font = QFont(option.font)
-            sub_font.setPointSizeF(8.5)
+            sub_font = self._font(option.font, "sub", 8.5)
             painter.setFont(sub_font)
             painter.setPen(QColor(PALETTE.text_dim))
             sub_text = f"{track.display_artist} · {track.container}" if track is not None else ""
@@ -223,15 +237,13 @@ class TrackDelegate(QStyledItemDelegate):
                 painter.setBrush(QColor(PALETTE.accent))
                 painter.drawRoundedRect(marker, 1.5, 1.5)
         elif index.column() == 0:
-            font = QFont(option.font)
-            font.setPointSizeF(8.5)
+            font = self._font(option.font, "index", 8.5)
             painter.setFont(font)
             painter.setPen(QColor(PALETTE.accent) if is_current else QColor(PALETTE.text_dim))
             painter.drawText(rect, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, str(index.data() or ""))
         elif index.column() == 3:
             text = str(index.data() or "")
-            font = QFont(option.font)
-            font.setPointSizeF(8.3)
+            font = self._font(option.font, "chip", 8.3)
             painter.setFont(font)
             metrics = QFontMetrics(font)
             width = metrics.horizontalAdvance(text) + 14
@@ -283,14 +295,14 @@ class PlaylistView(QWidget):
             toolbar_row = QHBoxLayout()
             toolbar_row.setContentsMargins(0, 0, 0, 0)
             toolbar_row.setSpacing(8)
-            self.count_label = QLabel("0 tracks")
+            self.count_label = QLabel("0 pistas")
             self.count_label.setObjectName("Hint")
             toolbar_row.addWidget(self.count_label)
             toolbar_row.addStretch(1)
-            self.add_button = QPushButton("Add files")
+            self.add_button = QPushButton("Añadir archivos")
             self.add_button.clicked.connect(self.addFilesRequested.emit)
             toolbar_row.addWidget(self.add_button)
-            self.clear_button = QPushButton("Clear")
+            self.clear_button = QPushButton("Vaciar")
             self.clear_button.clicked.connect(self.clearRequested.emit)
             toolbar_row.addWidget(self.clear_button)
             layout.addLayout(toolbar_row)
@@ -322,13 +334,18 @@ class PlaylistView(QWidget):
         self.table.horizontalHeader().resizeSection(3, 118)
         self.table.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
         self.table.horizontalHeader().resizeSection(4, 58)
+        self._fit_fixed_columns()
         self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         layout.addWidget(self.table, 1)
 
-        self.empty_label = QLabel("Queue is empty — add files or drag a folder")
+        self.empty_label = QLabel("La cola está vacía: añade archivos o arrastra una carpeta")
         self.empty_label.setObjectName("Hint")
         self.empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.empty_label.setTextInteractionFlags(Qt.TextInteractionFlag.NoTextInteraction)
+        self.empty_label.setWordWrap(True)
+        # The message must not dictate the minimum width of the panel: the view
+        # has to stay able to collapse and hide its lower priority columns.
+        self.empty_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.empty_label.setMinimumHeight(54)
         layout.addWidget(self.empty_label)
         self._refresh_state()
@@ -352,7 +369,7 @@ class PlaylistView(QWidget):
         count = len(self._playlist)
         duration = self._playlist.total_duration
         if self.count_label is not None:
-            self.count_label.setText(f"{count} track{'s' if count != 1 else ''} · {format_duration(duration)}")
+            self.count_label.setText(f"{count} {'pistas' if count != 1 else 'pista'} · {format_duration(duration)}")
         self.empty_label.setVisible(count == 0)
         self.table.setVisible(count > 0)
         self.table.setEnabled(count > 0)
@@ -365,11 +382,11 @@ class PlaylistView(QWidget):
     def _show_context_menu(self, position: QPoint) -> None:
         index = self.table.indexAt(position)
         menu = QMenu(self)
-        play_action = menu.addAction("Play now")
-        remove_action = menu.addAction("Remove from queue")
+        play_action = menu.addAction("Reproducir ahora")
+        remove_action = menu.addAction("Quitar de la cola")
         menu.addSeparator()
-        reveal_action = menu.addAction("Show in Explorer")
-        copy_action = menu.addAction("Copy file path")
+        reveal_action = menu.addAction("Mostrar en el Explorador")
+        copy_action = menu.addAction("Copiar la ruta del archivo")
         play_action.setEnabled(index.isValid())
         remove_action.setEnabled(index.isValid())
         reveal_action.setEnabled(index.isValid())
@@ -391,12 +408,22 @@ class PlaylistView(QWidget):
 
             QApplication.clipboard().setText(track.path)
 
+    def _fit_fixed_columns(self) -> None:
+        """Widen the fixed columns to their header label; never clip «DURACIÓN»."""
+
+        header = self.table.horizontalHeader()
+        for column, minimum in ((3, 118), (4, 58)):
+            hint = header.sectionSizeHint(column)
+            if hint > minimum and header.sectionSize(column) < hint:
+                header.resizeSection(column, hint)
+
     def resizeEvent(self, event) -> None:  # type: ignore[override]
         super().resizeEvent(event)
         width = self.width()
         self.table.setColumnHidden(2, width < 620)
         self.table.setColumnHidden(3, width < 500)
         self.table.verticalHeader().setDefaultSectionSize(38 if self.height() < 230 else ROW_HEIGHT)
+        self._fit_fixed_columns()
 
     def keyPressEvent(self, event) -> None:  # type: ignore[override]
         if event.key() in (Qt.Key.Key_Delete, Qt.Key.Key_Backspace):

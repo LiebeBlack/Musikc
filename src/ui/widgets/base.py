@@ -162,6 +162,11 @@ class ElidedLabel(QLabel):
         self.setToolTip(self._full_text)
         self._apply_elide()
 
+    def text(self) -> str:  # type: ignore[override]
+        """The logical text: the elided fragment is only what gets painted."""
+
+        return self._full_text
+
     def full_text(self) -> str:
         return self._full_text
 
@@ -170,6 +175,8 @@ class ElidedLabel(QLabel):
         self._apply_elide()
 
     def _apply_elide(self) -> None:
+        if self.width() <= 1:
+            return  # not laid out yet: never flash a bare ellipsis
         metrics = QFontMetrics(self.font())
         elided = metrics.elidedText(self._full_text, Qt.TextElideMode.ElideRight, max(10, self.width()))
         if elided != super().text():
@@ -264,20 +271,34 @@ class InfoRow(QWidget):
         layout.setSpacing(10)
         self._label = QLabel(label.upper())
         self._label.setObjectName("TileTitle")
-        self._value = MonoLabel(value) if mono else QLabel(value)
-        if not mono:
+        self._value_text = value
+        if mono:
+            self._value: QLabel = MonoLabel(value)
+            # Long digests and paths must not widen the whole card.
+            self._value.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+            self._value.setToolTip(value)
+        else:
+            self._value = ElidedLabel(value)
             self._value.setObjectName("TileSub")
         self._value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self._color_name = ""
         layout.addWidget(self._label)
         layout.addStretch(1)
         layout.addWidget(self._value)
 
     def set_value(self, value: str) -> None:
-        if self._value.text() != value:
-            self._value.setText(value)
+        if value == self._value_text:
+            return
+        self._value_text = value
+        self._value.setText(value)
+        self._value.setToolTip(value)
 
     def set_value_color(self, color: QColor) -> None:
-        self._value.setStyleSheet(f"color: {color.name()};")
+        name = color.name()
+        if name == self._color_name:
+            return
+        self._color_name = name
+        self._value.setStyleSheet(f"color: {name};")
 
 
 class DotIndicator(QWidget):

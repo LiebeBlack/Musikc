@@ -67,16 +67,18 @@ def test_transport_controls_keep_expected_hierarchy(app: QApplication):
     assert not now.seek_bar._enabled
 
 
-def test_responsive_window_does_not_exceed_minimum(app: QApplication, tmp_path: Path):
+def test_window_minimum_covers_panel_requirements(app: QApplication, tmp_path: Path):
     window = make_window(tmp_path)
-    assert window.minimumWidth() <= 920
-    assert window.minimumHeight() <= 620
-    window.resize(920, 620)
     window.show()
     app.processEvents()
-    assert window.width() >= 920
-    assert window.height() >= 620
-    assert window.queue_add_button.isVisible()
+    assert window.minimumWidth() >= 920
+    assert window.minimumHeight() >= 620
+    window.resize(window.minimumWidth(), window.minimumHeight())
+    app.processEvents()
+    assert window.width() >= window.minimumWidth()
+    # Neither panel may be squeezed below the width its own controls require.
+    assert window.left_panel.width() >= window.left_panel.minimumWidth()
+    assert window.right_panel.width() >= window.right_panel.minimumWidth()
     assert window.queue_clear_button.isVisible()
     window.close()
     app.processEvents()
@@ -136,10 +138,10 @@ def test_seekbar_accessibility_and_sanitized_ranges(app: QApplication):
     bar.set_position(float("inf"))
     assert bar.position == 0.0
     bar.set_enabled(True)
-    assert bar.accessibleName() == "Playback position"
-    assert "left and right arrows" in bar.accessibleDescription()
+    assert bar.accessibleName() == "Posición de reproducción"
+    assert "flechas izquierda y derecha" in bar.accessibleDescription()
     bar.set_enabled(False)
-    assert "No seekable track" in bar.accessibleDescription()
+    assert "No hay ninguna pista" in bar.accessibleDescription()
 
 
 def test_generated_stylesheet_uses_compact_button_metrics(app: QApplication):

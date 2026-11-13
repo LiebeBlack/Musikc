@@ -63,7 +63,7 @@ from ..core.telemetry import TelemetrySnapshot
 from .icons import logo_path
 from .qt_bridge import QtBridge
 from .theme import PALETTE, alpha, attach_fade
-from .widgets.base import Card, Chip, ElidedLabel, IconButton, InfoRow, MonoLabel, SectionLabel
+from .widgets.base import Card, Chip, ElidedLabel, IconButton, InfoRow, SectionLabel
 from .widgets.badge import BitPerfectBadge, StatusPill
 from .widgets.device_panel import DevicePanel
 from .widgets.library_view import LibraryView
@@ -73,18 +73,15 @@ from .widgets.telemetry_panel import TelemetryPanel
 
 LOGGER = get_logger("ui.main")
 
-AUDIO_FILTER = (
-    "Audio files ("
-    + " ".join(f"*{extension}" for extension in SUPPORTED_EXTENSIONS)
-    + ");;All files (*.*)"
-)
-
-CONFIG_DIR = Path.home()
+_APP_ICON_CACHE: Dict[int, QIcon] = {}
 
 
 def build_app_icon(size: int = 256) -> QIcon:
-    """Render the application icon at runtime (no binary assets needed)."""
+    """Render the application brand mark at runtime (no binary assets needed)."""
 
+    cached = _APP_ICON_CACHE.get(size)
+    if cached is not None:
+        return cached
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
@@ -107,7 +104,9 @@ def build_app_icon(size: int = 256) -> QIcon:
     painter.setBrush(gradient)
     painter.drawPath(wave)
     painter.end()
-    return QIcon(pixmap)
+    icon = QIcon(pixmap)
+    _APP_ICON_CACHE[size] = icon
+    return icon
 
 
 class LogoMark(QWidget):
@@ -138,24 +137,24 @@ class LogoMark(QWidget):
 
 
 class FooterStrip(QFrame):
-    """Slim telemetry strip pinned to the bottom of the window."""
+    """Slim live strip pinned to the bottom of the window.
+
+    Only the values that have no other home are shown here: the engine state
+    lives in the now-playing chip, the DSP attestation in the session report.
+    """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self.setObjectName("FooterSurface")
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(18, 8, 18, 8)
+        layout.setContentsMargins(18, 6, 18, 6)
         layout.setSpacing(16)
 
-        self.state_label = QLabel("ENGINE OFFLINE")
-        self.state_label.setObjectName("TileTitle")
-        layout.addWidget(self.state_label)
-
-        self.clock_label = self._make_pair("CLOCK", "—")
-        self.depth_label = self._make_pair("DEPTH", "—")
-        self.buffer_label = self._make_pair("BUFFER", "—")
-        self.latency_label = self._make_pair("LATENCY", "—")
-        self.xrun_label = self._make_pair("XRUNS", "0")
+        self.clock_label = self._make_pair("RELOJ", "—")
+        self.depth_label = self._make_pair("PROFUNDIDAD", "—")
+        self.buffer_label = self._make_pair("BÚFER", "—")
+        self.latency_label = self._make_pair("LATENCIA", "—")
+        self.xrun_label = self._make_pair("CORTES", "0")
         layout.addWidget(self.clock_label[0])
         layout.addWidget(self.depth_label[0])
         layout.addWidget(self.buffer_label[0])
@@ -163,6 +162,7 @@ class FooterStrip(QFrame):
         layout.addWidget(self.xrun_label[0])
         layout.addStretch(1)
 
+        self._xrun_color = ""
         self.message_label = ElidedLabel("")
         self.message_label.setObjectName("Hint")
         self.message_label.setMinimumWidth(160)
@@ -170,15 +170,6 @@ class FooterStrip(QFrame):
         self._message_timer = QTimer(self)
         self._message_timer.setSingleShot(True)
         self._message_timer.timeout.connect(lambda: self.message_label.setText(""))
-
-        self.digest_label = MonoLabel("")
-        self.digest_label.setObjectName("Hint")
-        layout.addWidget(self.digest_label)
-        self.dsp_chip = Chip("ZERO DSP", "accent")
-        layout.addWidget(self.dsp_chip)
-        self.priority_label = QLabel("prioridad estándar")
-        self.priority_label.setObjectName("Hint")
-        layout.addWidget(self.priority_label)
 
     def _make_pair(self, name: str, value: str):
         container = QWidget()
@@ -199,7 +190,6 @@ class FooterStrip(QFrame):
         self._message_timer.start(max(1000, milliseconds))
 
     def update_from(self, snapshot: TelemetrySnapshot) -> None:
-        self.state_label.setText(snapshot.state.upper())
         clock = snapshot.hardware_clock or snapshot.source_rate
         self.clock_label[1].setText(humanise_rate(clock) if clock else "—")
         depth = snapshot.hardware_bits or snapshot.source_bits
@@ -208,17 +198,22 @@ class FooterStrip(QFrame):
         self.latency_label[1].setText(f"{snapshot.latency_ms:.1f} ms")
         xruns = snapshot.xruns
         self.xrun_label[1].setText(str(xruns))
-        self.xrun_label[1].setStyleSheet(
-            f"color: {PALETTE.danger};" if xruns else f"color: {PALETTE.success};"
-        )
-        digest = snapshot.integrity_digest[:16]
-        self.digest_label.setText(f"BLAKE2b {digest}…" if digest else "")
-        self.priority_label.setText("MMCSS Pro Audio" if snapshot.priority_realtime else "prioridad estándar")
-        self.dsp_chip.setText("ZERO DSP" if not snapshot.dsp_chain else f"{len(snapshot.dsp_chain)} DSP")
+        color_key = "danger" if xruns else "success"
+        if color_key != self._xrun_color:
+            # setStyleSheet() re-evaluates the stylesheet: apply it on transitions only.
+            self._xrun_color = color_key
+            self.xrun_label[1].setStyleSheet(
+                f"color: {PALETTE.danger};" if xruns else f"color: {PALETTE.success};"
+            )
 
 
 class SessionPanel(QWidget):
-    """Technical metadata and integrity report for the current stream."""
+    """Technical metadata and integrity verdict for the current stream.
+
+    Clock, depth, driver and scheduling are already reported by the header and
+    the hardware tab, so this panel only adds what is unique to the session:
+    the source metadata, the byte count and the integrity proof.
+    """
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -227,22 +222,16 @@ class SessionPanel(QWidget):
         layout.setSpacing(12)
         card = Card(spacing=4)
         card.body.setContentsMargins(16, 14, 16, 14)
-        card.body.addWidget(SectionLabel("Source metadata"))
+        card.body.addWidget(SectionLabel("Metadatos de origen"))
         self.rows: Dict[str, InfoRow] = {
-            "path": InfoRow("File", "—"),
-            "container": InfoRow("Container", "—"),
-            "codec": InfoRow("Codec", "—"),
-            "source": InfoRow("Source format", "—"),
-            "transport": InfoRow("DAC transport", "—"),
-            "clock": InfoRow("Hardware clock", "—"),
-            "depth": InfoRow("Hardware depth", "—"),
-            "driver": InfoRow("Driver", "—"),
-            "device": InfoRow("Device", "—"),
-            "priority": InfoRow("Scheduling", "—"),
-            "bytes": InfoRow("Bytes to DAC", "—"),
-            "xruns": InfoRow("Underruns", "0"),
-            "digest": InfoRow("Output digest", "—"),
-            "verdict": InfoRow("Integrity verdict", "—"),
+            "path": InfoRow("Archivo", "—"),
+            "container": InfoRow("Contenedor", "—"),
+            "codec": InfoRow("Códec", "—"),
+            "source": InfoRow("Formato de origen", "—"),
+            "transport": InfoRow("Transporte del DAC", "—"),
+            "bytes": InfoRow("Bytes enviados al DAC", "—"),
+            "digest": InfoRow("Huella de salida", "—"),
+            "verdict": InfoRow("Veredicto de integridad", "—"),
         }
         for row in self.rows.values():
             card.body.addWidget(row)
@@ -250,44 +239,40 @@ class SessionPanel(QWidget):
 
         policy = Card(spacing=6)
         policy.body.setContentsMargins(16, 14, 16, 14)
-        policy.body.addWidget(SectionLabel("Processing policy"))
+        policy.body.addWidget(SectionLabel("Política de procesamiento"))
         text = QLabel(
-            "True HQ Audio applies no gain, no normalisation, no limiter, no equaliser, "
-            "no dither and no resampling. The only transformation allowed is a lossless "
-            "container repack (bit shift into a wider sample word), and it is logged here."
+            "True HQ Audio no aplica ganancia, normalización, limitación, ecualización, "
+            "tramado ni remuestreo. La única transformación permitida es cambiar el "
+            "contenedor sin pérdida (desplazando los bits a una palabra de muestra más amplia), y queda registrada aquí."
         )
         text.setWordWrap(True)
         text.setObjectName("Hint")
         policy.body.addWidget(text)
-        chips = QHBoxLayout()
-        chips.setContentsMargins(0, 0, 0, 0)
-        chips.setSpacing(6)
-        for label in ("NO GAIN", "NO LIMITER", "NO EQ", "NO RESAMPLING", "NO DITHER"):
-            chips.addWidget(Chip(label, "accent"))
-        chips.addStretch(1)
-        policy.body.addLayout(chips)
+        # The paragraph above already lists every guarantee: a second row of
+        # chips repeating them only widened the pane and duplicated the data.
         layout.addWidget(policy)
         layout.addStretch(1)
 
-    def update_from(self, snapshot: TelemetrySnapshot, engine) -> None:
-        report = engine.integrity_report()
+    @staticmethod
+    def _verdict(snapshot: TelemetrySnapshot) -> tuple[str, str]:
+        if snapshot.bit_perfect:
+            return ("BIT-PERFECT · DoP" if snapshot.is_dsd else "BIT-PERFECT"), PALETTE.accent
+        if snapshot.state in ("idle", "stopped", "closed", "opening", "error"):
+            return "EN ESPERA", PALETTE.text_muted
+        reason = snapshot.bit_perfect_reason or "DEGRADADO"
+        return reason[:64], PALETTE.warning
+
+    def update_from(self, snapshot: TelemetrySnapshot) -> None:
         self.rows["path"].set_value(Path(snapshot.track_path).name if snapshot.track_path else "—")
         self.rows["container"].set_value(snapshot.track_container or "—")
         self.rows["codec"].set_value(snapshot.track_codec or "—")
         self.rows["source"].set_value(snapshot.source_format or "—")
-        transport = snapshot.hardware_format or "—"
-        self.rows["transport"].set_value(transport)
-        self.rows["clock"].set_value(humanise_rate(snapshot.hardware_clock) if snapshot.hardware_clock else "—")
-        self.rows["depth"].set_value(f"{snapshot.hardware_bits}-bit" if snapshot.hardware_bits else "—")
-        self.rows["driver"].set_value(snapshot.driver_label or "—")
-        self.rows["device"].set_value(snapshot.device_name or "—")
-        self.rows["priority"].set_value(snapshot.priority or "—")
+        self.rows["transport"].set_value(snapshot.hardware_format or "—")
         self.rows["bytes"].set_value(format_bytes(snapshot.integrity_bytes_sent))
-        self.rows["xruns"].set_value(str(snapshot.xruns))
-        self.rows["digest"].set_value(report.output_digest or "—")
-        verdict_color = QColor(PALETTE.accent) if report.is_bit_perfect else QColor(PALETTE.warning)
-        self.rows["verdict"].set_value(report.verdict.value)
-        self.rows["verdict"].set_value_color(verdict_color)
+        self.rows["digest"].set_value(f"BLAKE2b {snapshot.integrity_digest}" if snapshot.integrity_digest else "—")
+        verdict, color = self._verdict(snapshot)
+        self.rows["verdict"].set_value(verdict)
+        self.rows["verdict"].set_value_color(QColor(color))
 
 
 class PreferencesDialog(QDialog):
@@ -295,7 +280,7 @@ class PreferencesDialog(QDialog):
 
     def __init__(self, settings: SettingsStore, engine_config, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Engine preferences")
+        self.setWindowTitle("Preferencias del motor")
         self.setMinimumWidth(430)
         self._settings = settings
         layout = QVBoxLayout(self)
@@ -307,27 +292,27 @@ class PreferencesDialog(QDialog):
         self.device_buffer.setRange(8, 500)
         self.device_buffer.setSuffix(" ms")
         self.device_buffer.setValue(int(getattr(engine_config, "buffer_ms", 24)))
-        form.addRow("Driver buffer request", self.device_buffer)
+        form.addRow("Tamaño solicitado al controlador", self.device_buffer)
         self.ring_buffer = QSpinBox()
         self.ring_buffer.setRange(200, 4000)
         self.ring_buffer.setSingleStep(100)
         self.ring_buffer.setSuffix(" ms")
         self.ring_buffer.setValue(int(getattr(engine_config, "ring_ms", 1200)))
-        form.addRow("Ring buffer capacity", self.ring_buffer)
+        form.addRow("Capacidad del búfer circular", self.ring_buffer)
         self.period = QSpinBox()
         self.period.setRange(0, 8192)
         self.period.setSingleStep(64)
-        self.period.setSuffix(" frames")
-        self.period.setSpecialValueText("driver default")
+        self.period.setSuffix(" tramas")
+        self.period.setSpecialValueText("valor predeterminado")
         self.period.setValue(int(getattr(engine_config, "period_frames", 0)))
-        form.addRow("Period size", self.period)
-        self.allow_degraded = QCheckBox("Allow lossy conversion when the DAC cannot accept the source depth")
+        form.addRow("Tamaño del período", self.period)
+        self.allow_degraded = QCheckBox("Permitir conversión con pérdida si el DAC no admite la profundidad de origen")
         self.allow_degraded.setChecked(bool(getattr(engine_config, "allow_degraded", False)))
         form.addRow("", self.allow_degraded)
         layout.addLayout(form)
         note = QLabel(
-            "These settings only affect buffering and negotiation. They never change the samples: "
-            "the engine refuses lossy conversions unless explicitly allowed above."
+            "Estos ajustes solo afectan al búfer y a la negociación. No modifican las muestras: "
+            "el motor rechaza las conversiones con pérdida salvo que se permitan expresamente arriba."
         )
         note.setWordWrap(True)
         note.setObjectName("Hint")
@@ -366,15 +351,15 @@ class MainWindow(QMainWindow):
         self._devices: List[DeviceInfo] = []
         self._syncing = False
         self._snapshot = engine.snapshot()
-        self._last_state = "idle"
-        self._drag_active = False
         self._xrun_override_until = 0.0
 
         self.setWindowTitle(f"{APP_NAME} {APP_VERSION}")
         self.setWindowIcon(build_app_icon())
         self.setMinimumSize(920, 620)
         self.setAcceptDrops(True)
+        self._minimum_size_final = False
         self._build_ui()
+        self._apply_minimum_size()
         self._connect_bridge()
         self._install_shortcuts()
         self._start_polling()
@@ -382,7 +367,7 @@ class MainWindow(QMainWindow):
         self._apply_snapshot(engine.snapshot())
         self.device_combo.blockSignals(True)
         if self.device_combo.count() == 0:
-            self.device_combo.addItem("Detecting output devices…", -1)
+            self.device_combo.addItem("Detectando dispositivos de salida…", -1)
         self.device_combo.blockSignals(False)
 
     # ------------------------------------------------------------------- build
@@ -394,7 +379,8 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        root_layout.addWidget(self._build_header())
+        self.header = self._build_header()
+        root_layout.addWidget(self.header)
 
         content = QWidget()
         content.setObjectName("ContentSurface")
@@ -425,14 +411,13 @@ class MainWindow(QMainWindow):
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(8)
-        header.addWidget(SectionLabel("Session queue"))
-        self.queue_chip = Chip("0 TRACKS", "chip")
+        header.addWidget(SectionLabel("Cola de reproducción"))
+        self.queue_chip = Chip("0 PISTAS", "chip")
         header.addWidget(self.queue_chip)
         header.addStretch(1)
-        self.queue_add_button = QPushButton("Add files")
-        self.queue_add_button.clicked.connect(self._open_files)
-        header.addWidget(self.queue_add_button)
-        self.queue_clear_button = QPushButton("Clear")
+        # "Abrir archivos" lives in the header: adding to the queue is the same
+        # action, so the card only offers the queue-specific control.
+        self.queue_clear_button = QPushButton("Vaciar")
         self.queue_clear_button.setEnabled(len(self._controller.playlist) > 0)
         self.queue_clear_button.clicked.connect(self._on_clear_queue)
         header.addWidget(self.queue_clear_button)
@@ -458,15 +443,13 @@ class MainWindow(QMainWindow):
         self.library_view.queueRequested.connect(self._on_library_queue)
         self.library_view.foldersChanged.connect(self._on_folders_changed)
         self.library_view.statusMessage.connect(self._show_status)
-        self.tabs.addTab(self.library_view, "LIBRARY")
+        self.tabs.addTab(self.library_view, "BIBLIOTECA")
 
         hardware = QWidget()
         hardware_layout = QVBoxLayout(hardware)
         hardware_layout.setContentsMargins(0, 8, 0, 0)
         hardware_layout.setSpacing(12)
         self.device_panel = DevicePanel(self._engine.devices)
-        self.device_panel.deviceChanged.connect(self._on_device_panel_changed)
-        self.device_panel.exclusiveToggled.connect(self._on_panel_exclusive_toggled)
         self.telemetry_panel = TelemetryPanel()
         hardware_layout.addWidget(self.device_panel)
         hardware_layout.addWidget(self.telemetry_panel)
@@ -474,29 +457,59 @@ class MainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setWidget(hardware)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Narrow windows must still be able to reach the right edge of a row.
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.tabs.addTab(scroll, "HARDWARE")
 
         self.session_panel = SessionPanel()
         session_scroll = QScrollArea()
         session_scroll.setWidgetResizable(True)
         session_scroll.setWidget(self.session_panel)
-        session_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.tabs.addTab(session_scroll, "SESSION")
+        session_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.tabs.addTab(session_scroll, "SESIÓN")
 
         right_layout.addWidget(self.tabs, 1)
-        left.setMinimumWidth(390)
-        right.setMinimumWidth(280)
+        # A splitter shrinks its children below their own layout hints, which
+        # clips buttons: pin each panel to what it actually needs.
+        left.setMinimumWidth(max(400, left.minimumSizeHint().width()))
+        right.setMinimumWidth(max(330, right.minimumSizeHint().width()))
+        self.left_panel = left
+        self.right_panel = right
+        self.splitter = splitter
         splitter.addWidget(left)
         splitter.addWidget(right)
-        splitter.setStretchFactor(0, 58)
-        splitter.setStretchFactor(1, 42)
-        splitter.setSizes([820, 520])
+        splitter.setStretchFactor(0, 55)
+        splitter.setStretchFactor(1, 45)
+        splitter.setSizes([790, 560])
         content_layout.addWidget(splitter, 1)
         root_layout.addWidget(content, 1)
 
         self.footer = FooterStrip()
         root_layout.addWidget(self.footer)
+
+    def _apply_minimum_size(self) -> None:
+        """Keep the window at least as wide as the header and both panels need."""
+
+        content = self.centralWidget().layout().itemAt(1).widget()
+        margins = content.layout().contentsMargins()
+        panels = (
+            self.left_panel.minimumWidth()
+            + self.right_panel.minimumWidth()
+            + self.splitter.handleWidth()
+        )
+        width = max(
+            920,
+            panels + margins.left() + margins.right(),
+            self.header.minimumSizeHint().width(),
+        )
+        self.setMinimumWidth(max(self.minimumWidth(), width))
+
+    def showEvent(self, event) -> None:  # type: ignore[override]
+        super().showEvent(event)
+        if not self._minimum_size_final:
+            # Font metrics are final only after the first polish pass.
+            self._minimum_size_final = True
+            self._apply_minimum_size()
 
     def _build_header(self) -> QWidget:
         header = QFrame()
@@ -513,22 +526,32 @@ class MainWindow(QMainWindow):
         titles = QVBoxLayout()
         titles.setContentsMargins(0, 0, 0, 0)
         titles.setSpacing(0)
+        name_row = QHBoxLayout()
+        name_row.setContentsMargins(0, 0, 0, 0)
+        name_row.setSpacing(8)
         name = QLabel("TRUE HQ AUDIO")
         name.setObjectName("AppTitle")
-        subtitle = QLabel("BIT-PERFECT REFERENCE PLAYER")
+        name_row.addWidget(name)
+        self.version_label = QLabel(f"v{APP_VERSION}")
+        self.version_label.setObjectName("AppVersion")
+        self.version_label.setToolTip(f"Versión {APP_VERSION}")
+        name_row.addWidget(self.version_label)
+        name_row.addStretch(1)
+        subtitle = ElidedLabel("REPRODUCCIÓN DE REFERENCIA · BIT-PERFECT")
         subtitle.setObjectName("AppSubtitle")
-        titles.addWidget(name)
+        subtitle.setToolTip("Reproducción de referencia con ruta de señal bit-perfect")
+        titles.addLayout(name_row)
         titles.addWidget(subtitle)
         top.addLayout(titles)
         top.addStretch(1)
         self.badge = BitPerfectBadge()
         top.addWidget(self.badge)
         top.addSpacing(8)
-        self.open_button = QPushButton("Open files")
+        self.open_button = QPushButton("Abrir archivos")
         self.open_button.setObjectName("Primary")
         self.open_button.clicked.connect(self._open_files)
         top.addWidget(self.open_button)
-        self.menu_button = IconButton("settings", "Application menu", size=34, icon_size=16)
+        self.menu_button = IconButton("settings", "Menú de la aplicación", size=34, icon_size=16)
         self.menu_button.clicked.connect(self._show_menu)
         top.addWidget(self.menu_button)
         outer.addLayout(top)
@@ -536,7 +559,7 @@ class MainWindow(QMainWindow):
         second = QHBoxLayout()
         second.setContentsMargins(0, 0, 0, 0)
         second.setSpacing(10)
-        device_label = QLabel("OUTPUT")
+        device_label = QLabel("SALIDA")
         device_label.setObjectName("TileTitle")
         second.addWidget(device_label)
         self.device_combo = QComboBox()
@@ -546,16 +569,16 @@ class MainWindow(QMainWindow):
         self.device_combo.setMinimumContentsLength(24)
         self.device_combo.currentIndexChanged.connect(self._on_device_combo_changed)
         second.addWidget(self.device_combo, 1)
-        self.exclusive_check = QCheckBox("Exclusive")
+        self.exclusive_check = QCheckBox("Exclusivo")
         self.exclusive_check.setChecked(True)
-        self.exclusive_check.setToolTip("WASAPI/WDM-KS exclusive mode: the OS mixer is bypassed")
+        self.exclusive_check.setToolTip("Modo exclusivo WASAPI/WDM-KS: se omite el mezclador del sistema operativo")
         self.exclusive_check.toggled.connect(self._on_exclusive_toggled)
         second.addWidget(self.exclusive_check)
         self.driver_pill = StatusPill("—", accent=True)
         second.addWidget(self.driver_pill)
         self.clock_pill = StatusPill("—")
         second.addWidget(self.clock_pill)
-        self.refresh_button = IconButton("refresh", "Rescan audio devices (F5)", size=34, icon_size=16)
+        self.refresh_button = IconButton("refresh", "Volver a buscar dispositivos de audio (F5)", size=34, icon_size=16)
         self.refresh_button.clicked.connect(self._refresh_devices)
         second.addWidget(self.refresh_button)
         outer.addLayout(second)
@@ -572,7 +595,6 @@ class MainWindow(QMainWindow):
         self._bridge.deviceRestored.connect(self._on_device_restored)
         self._bridge.playlistChanged.connect(self._on_playlist_changed)
         self._bridge.playlistTrack.connect(self._on_playlist_track)
-        self._bridge.integrityUpdated.connect(self._on_integrity)
 
     def _install_shortcuts(self) -> None:
         bindings = {
@@ -594,9 +616,12 @@ class MainWindow(QMainWindow):
             shortcut.activated.connect(callback)
 
     def _start_polling(self) -> None:
-        interval = max(60, int(self._settings.settings.telemetry_poll_ms))
+        # Live audio is refreshed at the engine cadence; an idle window wakes up
+        # once per second instead of repeating the same verification forever.
+        self._poll_active_ms = max(200, int(self._settings.settings.telemetry_poll_ms))
+        self._poll_idle_ms = max(1000, self._poll_active_ms * 4)
         self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(interval)
+        self._poll_timer.setInterval(self._poll_idle_ms)
         self._poll_timer.timeout.connect(self._on_poll)
         self._poll_timer.start()
 
@@ -669,9 +694,10 @@ class MainWindow(QMainWindow):
         self._syncing = True
         self.device_combo.clear()
         if not self._devices:
-            self.device_combo.addItem("No output device detected", -1)
+            self.device_combo.addItem("No se detectaron dispositivos de salida", -1)
             self._syncing = False
-            self.badge.set_state("error", "no output device")
+            self.device_panel.set_device(None)
+            self.badge.set_state("error", "no hay salida de audio")
             return
         for device in self._devices:
             label = f"{device.name}   ·   {device.driver_label}   ·   {device.max_output_channels} ch"
@@ -709,10 +735,10 @@ class MainWindow(QMainWindow):
             self.exclusive_check.setChecked(False)
             self.exclusive_check.blockSignals(False)
             self._show_status(
-                f"{device.driver_label} cannot run exclusively: shared mode is not bit-perfect"
+                f"{device.driver_label} no admite el modo exclusivo: el modo compartido no es bit-perfect"
             )
-        self.device_panel.select_device(device.name, device.host_api_name)
         self.device_panel.set_exclusive(self.exclusive_check.isChecked())
+        self.device_panel.set_device(device)
         if self._syncing:
             return
         self._engine.set_device(device.index, self.exclusive_check.isChecked())
@@ -722,23 +748,7 @@ class MainWindow(QMainWindow):
             exclusive_mode=self.exclusive_check.isChecked(),
         )
         if announce:
-            self._show_status(f"Output: {device.name} · {device.driver_label}")
-
-    def _on_device_panel_changed(self, device_index: int, exclusive: bool) -> None:
-        self.exclusive_check.blockSignals(True)
-        self.exclusive_check.setChecked(exclusive)
-        self.exclusive_check.blockSignals(False)
-        device = next((device for device in self._devices if device.index == device_index), None)
-        if device is None:
-            return
-        for position, candidate in enumerate(self._devices):
-            if candidate.index == device_index:
-                self.device_combo.blockSignals(True)
-                self.device_combo.setCurrentIndex(position)
-                self.device_combo.blockSignals(False)
-                break
-        self._engine.set_device(device_index, exclusive)
-        self._settings.update(output_device_name=device.name, output_host_api=device.host_api_name, exclusive_mode=exclusive)
+            self._show_status(f"Salida: {device.name} · {device.driver_label}")
 
     def _on_exclusive_toggled(self, checked: bool) -> None:
         device = self._current_device()
@@ -747,15 +757,7 @@ class MainWindow(QMainWindow):
         self._settings.update(exclusive_mode=checked)
         self.device_panel.set_exclusive(checked)
         self._engine.set_device(device.index, checked)
-        self._show_status("Exclusive mode enabled" if checked else "Shared mode: the OS mixer may resample")
-
-    def _on_panel_exclusive_toggled(self, checked: bool) -> None:
-        if self.exclusive_check.isChecked() == checked:
-            return
-        self.exclusive_check.blockSignals(True)
-        self.exclusive_check.setChecked(checked)
-        self.exclusive_check.blockSignals(False)
-        self._on_exclusive_toggled(checked)
+        self._show_status("Modo exclusivo activado" if checked else "Modo compartido: el mezclador del sistema podría remuestrear el audio")
 
     # -------------------------------------------------------------- transport
     def _on_seek(self, seconds: float) -> None:
@@ -765,13 +767,14 @@ class MainWindow(QMainWindow):
         mode = self._controller.cycle_repeat()
         self.now_playing.set_modes(mode.value, self._controller.playlist.shuffle)
         self._settings.update(repeat_mode=mode.value)
-        self._show_status(f"Repeat: {mode.value}")
+        label = {"off": "desactivada", "all": "cola completa", "one": "pista"}.get(mode.value, mode.value)
+        self._show_status(f"Repetición: {label}")
 
     def _on_shuffle(self) -> None:
         enabled = self._controller.toggle_shuffle()
         self.now_playing.set_modes(self._controller.playlist.repeat_mode.value, enabled)
         self._settings.update(shuffle=enabled)
-        self._show_status("Shuffle enabled" if enabled else "Shuffle disabled")
+        self._show_status("Reproducción aleatoria activada" if enabled else "Reproducción aleatoria desactivada")
 
     def _on_remove_track(self, index: int) -> None:
         self._controller.remove_index(index)
@@ -786,7 +789,7 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------- files
     def _open_files(self) -> None:
         start = self._settings.settings.last_directory or str(Path.home())
-        files, _filter = QFileDialog.getOpenFileNames(self, "Open audio files", start, AUDIO_FILTER)
+        files, _filter = QFileDialog.getOpenFileNames(self, "Abrir archivos de audio", start, "Archivos de audio (" + " ".join(f"*{extension}" for extension in SUPPORTED_EXTENSIONS) + ");;Todos los archivos (*.*)")
         if not files:
             return
         paths = [Path(file) for file in files]
@@ -800,13 +803,13 @@ class MainWindow(QMainWindow):
 
     def _open_folder(self) -> None:
         start = self._settings.settings.last_directory or str(Path.home())
-        folder = QFileDialog.getExistingDirectory(self, "Open folder", start)
+        folder = QFileDialog.getExistingDirectory(self, "Abrir carpeta", start)
         if not folder:
             return
         self._settings.update(last_directory=folder)
         paths = discover_files([Path(folder)])
         if not paths:
-            self._show_status("No supported audio files in that folder")
+            self._show_status("No hay archivos de audio compatibles en esa carpeta")
             return
         before = len(self._controller.playlist)
         added = self._controller.add_paths(paths, probe_file)
@@ -823,7 +826,7 @@ class MainWindow(QMainWindow):
     def _on_library_queue(self, paths: List[str]) -> None:
         added = self._controller.add_paths([Path(path) for path in paths], probe_file)
         self.playlist_view.refresh()
-        self._show_status(f"{added} track(s) added to the queue")
+        self._show_status(f"Se añadieron {added} pista(s) a la cola")
 
     def _on_folders_changed(self, folders: List[str]) -> None:
         self._settings.update(library_folders=list(folders))
@@ -831,20 +834,20 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------- menu
     def _show_menu(self) -> None:
         menu = QMenu(self)
-        open_files = menu.addAction("Open files…")
+        open_files = menu.addAction("Abrir archivos…")
         open_files.setShortcut(QKeySequence("Ctrl+O"))
-        open_folder = menu.addAction("Open folder…")
+        open_folder = menu.addAction("Abrir carpeta…")
         open_folder.setShortcut(QKeySequence("Ctrl+Shift+O"))
-        add_library = menu.addAction("Add music folder to library…")
+        add_library = menu.addAction("Añadir carpeta a la biblioteca…")
         menu.addSeparator()
-        save_playlist = menu.addAction("Save queue…")
-        load_playlist = menu.addAction("Load queue…")
+        save_playlist = menu.addAction("Guardar cola…")
+        load_playlist = menu.addAction("Cargar cola…")
         menu.addSeparator()
-        preferences = menu.addAction("Engine preferences…")
-        open_logs = menu.addAction("Open log folder")
-        about = menu.addAction("About True HQ Audio")
+        preferences = menu.addAction("Preferencias del motor…")
+        open_logs = menu.addAction("Abrir carpeta de registros")
+        about = menu.addAction("Acerca de True HQ Audio")
         menu.addSeparator()
-        quit_action = menu.addAction("Quit")
+        quit_action = menu.addAction("Salir")
         quit_action.setShortcut(QKeySequence("Ctrl+Q"))
         chosen = menu.exec(self.menu_button.mapToGlobal(self.menu_button.rect().bottomLeft()))
         if chosen is None:
@@ -873,30 +876,30 @@ class MainWindow(QMainWindow):
 
     def _save_playlist(self) -> None:
         start = str(Path(self._settings.settings.last_directory) / "queue.json")
-        target, _filter = QFileDialog.getSaveFileName(self, "Save queue", start, "True HQ queue (*.json)")
+        target, _filter = QFileDialog.getSaveFileName(self, "Guardar cola", start, "Cola de True HQ (*.json)")
         if not target:
             return
         try:
             self._controller.playlist.save(Path(target))
-            self._show_status(f"Queue saved to {target}")
+            self._show_status(f"Cola guardada en {target}")
         except OSError as exc:
-            self._show_status(f"Could not save the queue: {exc}")
+            self._show_status(f"No se pudo guardar la cola: {exc}")
 
     def _load_playlist(self) -> None:
         start = str(Path(self._settings.settings.last_directory))
-        target, _filter = QFileDialog.getOpenFileName(self, "Load queue", start, "True HQ queue (*.json)")
+        target, _filter = QFileDialog.getOpenFileName(self, "Cargar cola", start, "Cola de True HQ (*.json)")
         if not target:
             return
         try:
             playlist = Playlist.load(Path(target))
         except (OSError, ValueError) as exc:
-            self._show_status(f"Could not load the queue: {exc}")
+            self._show_status(f"No se pudo cargar la cola: {exc}")
             return
         self._controller.set_playlist(playlist)
         self.playlist_view.set_playlist(playlist)
         self.playlist_view.refresh()
         self.now_playing.set_modes(playlist.repeat_mode.value, playlist.shuffle)
-        self._show_status(f"Queue loaded ({len(playlist)} tracks)")
+        self._show_status(f"Cola cargada ({len(playlist)} pistas)")
 
     def _show_preferences(self) -> None:
         dialog = PreferencesDialog(self._settings, self._engine.config, self)
@@ -908,23 +911,23 @@ class MainWindow(QMainWindow):
                 period_frames=values["period_frames"],
                 allow_degraded_conversion=values["allow_degraded"],
             )
-            self._show_status("Engine preferences applied")
+            self._show_status("Preferencias del motor aplicadas")
 
     def _show_about(self) -> None:
         QMessageBox.about(
             self,
-            f"About {APP_NAME}",
+            f"Acerca de {APP_NAME}",
             f"<b>{APP_NAME}</b> {APP_VERSION}<br><br>"
-            "Bit-perfect reference player for Windows.<br>"
-            "Zero DSP. Zero resampling. Direct hardware clock.<br><br>"
-            "Signal path: decoder → lossless container mapper → lock-free ring → exclusive driver → DAC.<br>"
-            "No volume normalisation, no limiter, no equaliser, no dither.<br><br>"
+            "Reproductor de referencia bit-perfect para Windows.<br>"
+            "Sin DSP. Sin remuestreo. Reloj directo del hardware.<br><br>"
+            "Ruta de señal: decodificador → mapeador de contenedor sin pérdida → anillo sin bloqueos → "
+            "controlador exclusivo → DAC.<br>"
+            "Sin normalización de volumen, sin limitador, sin ecualizador, sin tramado.<br><br>"
             f"Python {sys.version.split()[0]} · PySide6",
         )
 
     # ------------------------------------------------------------------ bridge
     def _on_engine_state(self, state: str, payload: Dict[str, Any]) -> None:
-        self._last_state = state
         self.now_playing.set_playback_state(state)
         self.badge.set_state(self._badge_state_for(state), self._snapshot.bit_perfect_reason)
 
@@ -939,34 +942,35 @@ class MainWindow(QMainWindow):
         self.now_playing.set_track(payload)
         self.now_playing.set_playback_state("opening")
         if not payload.get("gapless"):
-            self.badge.set_state("off", "stream starting")
+            self.badge.set_state("off", "abriendo el flujo")
         self._settings.update(last_track=str(payload.get("path") or ""))
-        self.footer.update_from(self._engine.snapshot())
-        self.session_panel.update_from(self._engine.snapshot(), self._engine)
+        snapshot = self._engine.snapshot()
+        self.footer.update_from(snapshot)
+        self.session_panel.update_from(snapshot)
 
     def _on_stream_opened(self, payload: Dict[str, Any]) -> None:
         driver = payload.get("driver") or "driver"
         rate = int(payload.get("rate") or 0)
         bits = int(payload.get("bits") or 0)
         latency = float(payload.get("latency_ms") or 0.0)
-        self._show_status(f"{driver} locked · {bits}-bit {humanise_rate(rate)} · {latency:.1f} ms latency")
+        self._show_status(f"{driver} fijado · {bits} bits {humanise_rate(rate)} · {latency:.1f} ms de latencia")
 
     def _on_underrun(self, count: int, missing_frames: int) -> None:
-        self._show_status(f"Buffer underrun #{count} ({missing_frames} frames) — badge downgraded")
+        self._show_status(f"Corte de búfer #{count} ({missing_frames} tramas): el motor insertó silencio")
         self._xrun_override_until = time.monotonic() + 1.5
-        self.badge.set_state("degraded", f"{count} buffer underrun(s) inserted digital silence")
+        self.badge.set_state("degraded", f"{count} corte(s) de búfer insertaron silencio digital")
 
     def _on_device_lost(self, device: str, position: float) -> None:
-        self.badge.set_state("error", f"DAC disconnected: {device}")
-        self._show_status(f"DAC disconnected: {device}. Waiting for it to return…")
+        self.badge.set_state("error", f"DAC desconectado: {device}")
+        self._show_status(f"DAC desconectado: {device}. Esperando a que vuelva…")
 
     def _on_device_restored(self, device: str, position: float) -> None:
-        self._show_status(f"DAC reconnected: {device} — resuming from {position:.1f}s")
+        self._show_status(f"DAC reconectado: {device} — reanudando desde {position:.1f} s")
         self._refresh_devices()
 
     def _on_playlist_changed(self, payload: Dict[str, Any]) -> None:
         count = int(payload.get("count") or 0)
-        self.queue_chip.setText(f"{count} TRACK{'S' if count != 1 else ''}")
+        self.queue_chip.setText(f"{count} PISTA{'S' if count != 1 else ''}")
         self.queue_clear_button.setEnabled(count > 0)
         self.playlist_view.refresh()
         current = int(payload.get("current", -1))
@@ -978,14 +982,19 @@ class MainWindow(QMainWindow):
         if index >= 0:
             self.playlist_view.set_current(index)
 
-    def _on_integrity(self, payload: Dict[str, Any]) -> None:
-        digest = str(payload.get("digest") or "")
-        if digest:
-            self.footer.digest_label.setText(f"BLAKE2b {digest[:16]}…")
-
     # -------------------------------------------------------------------- poll
     def _on_poll(self) -> None:
+        if not self.isVisible() or self.isMinimized():
+            return
         self._apply_snapshot(self._engine.snapshot())
+
+    def _sync_poll_interval(self, state: str) -> None:
+        timer = getattr(self, "_poll_timer", None)
+        if timer is None:
+            return
+        interval = self._poll_active_ms if state in ("playing", "paused", "opening", "draining") else self._poll_idle_ms
+        if timer.interval() != interval:
+            timer.setInterval(interval)
 
     def _apply_snapshot(self, snapshot: TelemetrySnapshot) -> None:
         self._snapshot = snapshot
@@ -1016,11 +1025,12 @@ class MainWindow(QMainWindow):
         if self.tabs.currentIndex() == 1:
             self.telemetry_panel.update_from(snapshot, self._engine.telemetry.history())
         elif self.tabs.currentIndex() == 2:
-            self.session_panel.update_from(snapshot, self._engine)
+            self.session_panel.update_from(snapshot)
         if snapshot.device_name and snapshot.driver_label:
             self.driver_pill.set_text(snapshot.driver_label.upper(), accent=snapshot.exclusive)
         if snapshot.hardware_clock:
             self.clock_pill.set_text(humanise_rate(snapshot.hardware_clock), accent=snapshot.bit_perfect)
+        self._sync_poll_interval(snapshot.state)
 
     def _badge_state_for(self, state: str) -> str:
         snapshot = self._snapshot
@@ -1043,7 +1053,6 @@ class MainWindow(QMainWindow):
         if event.mimeData().hasUrls():
             for url in event.mimeData().urls():
                 if url.isLocalFile():
-                    self._drag_active = True
                     event.acceptProposedAction()
                     return
         sup = getattr(super(), "dragEnterEvent", None)
@@ -1066,7 +1075,7 @@ class MainWindow(QMainWindow):
         added = self._controller.add_paths(paths, probe_file)
         self.playlist_view.refresh()
         if added:
-            self._show_status(f"{added} track(s) added")
+            self._show_status(f"{added} pista(s) añadida(s)")
             self._controller.play_index(before)
             self.playlist_view.refresh()
         event.acceptProposedAction()

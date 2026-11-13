@@ -46,7 +46,7 @@ class SeekBar(QWidget):
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip("Seek — drag or click; arrows ±5 s, Page Up/Down ±30 s, Home/End")
+        self.setToolTip("Saltar — arrastra o haz clic; flechas ±5 s, Re/Av Pág ±30 s, Inicio/Fin")
 
     # -------------------------------------------------------------------- api
     @property
@@ -94,17 +94,17 @@ class SeekBar(QWidget):
         self.setCursor(
             Qt.CursorShape.PointingHandCursor if self._enabled else Qt.CursorShape.ArrowCursor
         )
-        self.setAccessibleName("Playback position")
+        self.setAccessibleName("Posición de reproducción")
         self._update_accessible_description()
         self.update()
 
     def _update_accessible_description(self) -> None:
         if not self._enabled:
-            description = "No seekable track loaded."
+            description = "No hay ninguna pista reproducible cargada."
         else:
             description = (
-                f"{_format_time(self._position)} of {_format_time(self._duration)}. "
-                "Use left and right arrows to seek 5 seconds; Home and End go to the beginning and end."
+                f"{_format_time(self._position)} de {_format_time(self._duration)}. "
+                "Usa las flechas izquierda y derecha para moverte 5 segundos; Inicio y Fin van al principio y al final."
             )
         self.setAccessibleDescription(description)
 

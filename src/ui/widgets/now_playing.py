@@ -28,7 +28,7 @@ class NowPlayingCard(Card):
 
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        self.state_chip = Chip("IDLE", "chip")
+        self.state_chip = Chip("EN ESPERA", "chip")
         header.addWidget(self.state_chip)
         header.addStretch(1)
         self.format_chip = Chip("", "accent")
@@ -39,11 +39,11 @@ class NowPlayingCard(Card):
         header.addWidget(self.container_chip)
         self.body.addLayout(header)
 
-        self.title_label = ElidedLabel("No track loaded")
+        self.title_label = ElidedLabel("No hay ninguna pista cargada")
         self.title_label.setObjectName("TrackTitle")
         self.body.addWidget(self.title_label)
 
-        self.artist_label = ElidedLabel("Open a file or pick a track from the library")
+        self.artist_label = ElidedLabel("Abre un archivo o elige una pista de la biblioteca")
         self.artist_label.setObjectName("TrackArtist")
         self.body.addWidget(self.artist_label)
 
@@ -85,10 +85,6 @@ class NowPlayingCard(Card):
         self.transport.shuffleRequested.connect(self.shuffleRequested.emit)
         transport_row.addWidget(self.transport)
         transport_row.addStretch(1)
-        self.mode_label = QLabel("")
-        self.mode_label.setObjectName("Hint")
-        self.mode_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        transport_row.addWidget(self.mode_label)
         self.body.addLayout(transport_row)
 
         self._duration = 0.0
@@ -121,8 +117,8 @@ class NowPlayingCard(Card):
         self._refresh_title_scale()
 
     def set_track(self, payload: Dict[str, Any]) -> None:
-        title = payload.get("title") or "Untitled"
-        artist = payload.get("artist") or "Unknown artist"
+        title = payload.get("title") or "Sin título"
+        artist = payload.get("artist") or "Artista desconocido"
         album = payload.get("album") or ""
         self.title_label.setText(title)
         self.artist_label.setText(artist)
@@ -150,8 +146,8 @@ class NowPlayingCard(Card):
         self._refresh_title_scale()
 
     def clear_track(self) -> None:
-        self.title_label.setText("No track loaded")
-        self.artist_label.setText("Open a file or pick a track from the library")
+        self.title_label.setText("No hay ninguna pista cargada")
+        self.artist_label.setText("Abre un archivo o elige una pista de la biblioteca")
         self.album_label.setText("")
         self.album_label.setVisible(False)
         self.format_chip.setVisible(False)
@@ -175,15 +171,15 @@ class NowPlayingCard(Card):
 
     def set_playback_state(self, state: str) -> None:
         labels = {
-            "playing": "PLAYING",
-            "paused": "PAUSED",
-            "stopped": "STOPPED",
-            "opening": "LOCKING CLOCK",
+            "playing": "REPRODUCIENDO",
+            "paused": "EN PAUSA",
+            "stopped": "DETENIDO",
+            "opening": "SINCRONIZANDO",
             "error": "ERROR",
-            "no_device": "DAC LOST",
-            "idle": "IDLE",
-            "closed": "CLOSED",
-            "draining": "DRAINING",
+            "no_device": "DAC DESCONECTADO",
+            "idle": "EN ESPERA",
+            "closed": "CERRADO",
+            "draining": "FINALIZANDO",
         }
         self.state_chip.setText(labels.get(state, state.upper()))
         self.state_chip.set_variant(
@@ -196,12 +192,10 @@ class NowPlayingCard(Card):
         self._refresh_title_scale()
 
     def set_modes(self, repeat: str, shuffle: bool) -> None:
+        """Reflect the queue modes on the transport toggles (their tooltips explain them)."""
+
         self.transport.set_repeat_mode(repeat)
         self.transport.set_shuffle(shuffle)
-        parts = []
-        parts.append(f"repeat {repeat}")
-        parts.append("shuffle on" if shuffle else "shuffle off")
-        self.mode_label.setText(" · ".join(parts))
 
     def _on_scrub_started(self) -> None:
         self._scrubbing = True

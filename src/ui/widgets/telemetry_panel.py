@@ -1,4 +1,9 @@
-"""Real-time hardware telemetry: clocks, buffer health, xruns and integrity."""
+"""Buffer health graph and signal path.
+
+The numeric readouts live in the footer strip (always visible) and in the session
+report, so this panel keeps only what those two cannot show: the buffer history,
+its occupancy meter and the attested signal path.
+"""
 
 from __future__ import annotations
 
@@ -6,14 +11,7 @@ from typing import Iterable, List, Optional
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (
-    QGridLayout,
-    QHBoxLayout,
-    QLabel,
-    QSizePolicy,
-    QVBoxLayout,
-    QWidget,
-)
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from ...config import humanise_rate
 from ...core.telemetry import TelemetrySnapshot
@@ -27,11 +25,9 @@ class Sparkline(QWidget):
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
         self._history: List[float] = []
-        self._minimum = 0.0
-        self._maximum = 1.0
         self.setMinimumHeight(64)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.setToolTip("Ring buffer occupancy over the last 480 samples")
+        self.setToolTip("Ocupación del búfer circular en las últimas 480 muestras")
 
     def set_history(self, history: Iterable[float]) -> None:
         self._history = [max(0.0, min(1.0, value)) for value in history]
@@ -45,7 +41,7 @@ class Sparkline(QWidget):
         painter.setBrush(QColor(PALETTE.surface_alt))
         painter.drawRoundedRect(rect, 8, 8)
 
-        for fraction, label in ((0.25, ""), (0.5, ""), (0.75, "")):
+        for fraction in (0.25, 0.5, 0.75):
             y = rect.bottom() - rect.height() * fraction
             pen = QPen(QColor(PALETTE.stroke))
             pen.setStyle(Qt.PenStyle.DashLine)
@@ -82,7 +78,7 @@ class Sparkline(QWidget):
             font = QFont(self.font())
             font.setPointSizeF(8.5)
             painter.setFont(font)
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "waiting for stream")
+            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, "esperando señal de audio")
         painter.end()
 
 
@@ -124,39 +120,8 @@ class MeterBar(QWidget):
         painter.end()
 
 
-class TelemetryTile(Card):
-    """Compact metric card."""
-
-    def __init__(self, title: str, value: str = "—", sub: str = "", parent: Optional[QWidget] = None) -> None:
-        super().__init__(parent, spacing=2)
-        self.body.setContentsMargins(14, 11, 14, 11)
-        self._title = QLabel(title.upper())
-        self._title.setObjectName("TileTitle")
-        self._value = QLabel(value)
-        self._value.setObjectName("TileValue")
-        self._sub = QLabel(sub)
-        self._sub.setObjectName("TileSub")
-        self.body.addWidget(self._title)
-        self.body.addWidget(self._value)
-        self.body.addWidget(self._sub)
-        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-
-    def set_value(self, value: str, sub: Optional[str] = None, color: Optional[QColor] = None) -> None:
-        if self._value.text() != value:
-            self._value.setText(value)
-        if sub is not None and self._sub.text() != sub:
-            self._sub.setText(sub)
-        if color is not None:
-            self._value.setStyleSheet(f"color: {color.name()};")
-        else:
-            self._value.setStyleSheet("")
-
-    def set_title(self, title: str) -> None:
-        self._title.setText(title.upper())
-
-
 class TelemetryPanel(QWidget):
-    """Grid of metrics plus buffer history and signal path."""
+    """Buffer health plus the attested signal path."""
 
     def __init__(self, parent: Optional[QWidget] = None) -> None:
         super().__init__(parent)
@@ -164,57 +129,34 @@ class TelemetryPanel(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
 
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
-        self.clock_tile = TelemetryTile("DAC clock", "—", "hardware rate")
-        self.depth_tile = TelemetryTile("Depth", "—", "valid bits")
-        self.buffer_tile = TelemetryTile("Buffer", "—", "ring occupancy")
-        self.latency_tile = TelemetryTile("Latency", "—", "driver + ring")
-        self.xrun_tile = TelemetryTile("Underruns", "0", "since stream start")
-        self.digest_tile = TelemetryTile("Stream hash", "—", "blake2b of DAC bytes")
-        tiles = [
-            self.clock_tile,
-            self.depth_tile,
-            self.buffer_tile,
-            self.latency_tile,
-            self.xrun_tile,
-            self.digest_tile,
-        ]
-        for index, tile in enumerate(tiles):
-            grid.addWidget(tile, index // 3, index % 3)
-        layout.addLayout(grid)
-
         buffer_card = Card(spacing=8)
         buffer_card.body.setContentsMargins(14, 12, 14, 12)
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
-        header.addWidget(SectionLabel("Buffer health"))
+        header.addWidget(SectionLabel("Estado del búfer"))
         header.addStretch(1)
-        self.buffer_state = Chip("IDLE", "chip")
+        self.buffer_state = Chip("EN ESPERA", "chip")
         header.addWidget(self.buffer_state)
         buffer_card.body.addLayout(header)
         self.sparkline = Sparkline()
         buffer_card.body.addWidget(self.sparkline)
         self.meter = MeterBar()
         buffer_card.body.addWidget(self.meter)
+        self.fill_row = InfoRow("Ocupación", "—")
+        self.capacity_row = InfoRow("Capacidad", "—")
+        self.latency_row = InfoRow("Latencia", "—")
+        self.xrun_row = InfoRow("Cortes", "0")
+        for row in (self.fill_row, self.capacity_row, self.latency_row, self.xrun_row):
+            buffer_card.body.addWidget(row)
         layout.addWidget(buffer_card)
 
         path_card = Card(spacing=6)
         path_card.body.setContentsMargins(14, 12, 14, 14)
-        title_row = QHBoxLayout()
-        title_row.setContentsMargins(0, 0, 0, 0)
-        title_row.addWidget(SectionLabel("Signal path"))
-        title_row.addStretch(1)
-        self.dsp_chip = Chip("ZERO DSP", "accent")
-        title_row.addWidget(self.dsp_chip)
-        path_card.body.addLayout(title_row)
-        self.conversion_row = InfoRow("Container mapping", "—")
-        self.driver_row = InfoRow("Driver", "—")
-        self.priority_row = InfoRow("Thread priority", "—")
-        self.device_row = InfoRow("Device", "—")
-        for row in (self.conversion_row, self.driver_row, self.priority_row, self.device_row):
+        path_card.body.addWidget(SectionLabel("Ruta de señal"))
+        self.conversion_row = InfoRow("Conversión del contenedor", "—")
+        self.driver_row = InfoRow("Controlador", "—")
+        self.priority_row = InfoRow("Prioridad del hilo", "—")
+        for row in (self.conversion_row, self.driver_row, self.priority_row):
             path_card.body.addWidget(row)
         self.notes = QLabel("")
         self.notes.setObjectName("Hint")
@@ -225,45 +167,30 @@ class TelemetryPanel(QWidget):
 
     # -------------------------------------------------------------------- api
     def update_from(self, snapshot: TelemetrySnapshot, history: Optional[Iterable[float]] = None) -> None:
-        clock = snapshot.hardware_clock or snapshot.source_rate
-        clock_text = humanise_rate(clock) if clock else "—"
-        source_text = (
-            f"source {humanise_rate(snapshot.source_rate)}" if snapshot.source_rate else "no source"
-        )
-        self.clock_tile.set_value(clock_text, source_text, QColor(PALETTE.accent) if snapshot.bit_perfect else None)
-
-        depth = snapshot.hardware_bits or snapshot.source_bits
-        depth_text = f"{depth}-bit" if depth else "—"
-        depth_sub = f"source {snapshot.source_bits}-bit" if snapshot.source_bits else "no source"
-        if snapshot.is_dsd:
-            depth_text = "DSD · DoP"
-            depth_sub = f"{snapshot.source_bits}-bit container"
-        self.depth_tile.set_value(depth_text, depth_sub)
-
-        buffer_text = f"{snapshot.buffer_ms:.1f} ms"
-        buffer_sub = f"of {snapshot.buffer_capacity_ms:.0f} ms · {snapshot.buffer_fill * 100:.0f}%"
-        self.buffer_tile.set_value(buffer_text, buffer_sub)
-        self.latency_tile.set_value(f"{snapshot.latency_ms:.1f} ms", f"clock {clock_text}")
-        xrun_color = QColor(PALETTE.danger) if snapshot.xruns else QColor(PALETTE.success)
-        self.xrun_tile.set_value(str(snapshot.xruns), f"{snapshot.silence_frames} silence frames", xrun_color)
-        digest = snapshot.integrity_digest[:12] if snapshot.integrity_digest else "—"
-        self.digest_tile.set_value(digest, f"{snapshot.integrity_bytes_sent / 1048576:.1f} MiB sent")
-
         self.meter.set_value(snapshot.buffer_fill)
         if history is not None:
             self.sparkline.set_history(history)
         health = snapshot.buffer_health
-        self.buffer_state.set_text({"optimal": "HEALTHY", "degraded": "LOW", "failing": "CRITICAL"}.get(health, "IDLE"))
-        self.buffer_state.set_variant("accent" if health == "optimal" else ("warning" if health == "degraded" else "chip"))
+        self.buffer_state.set_text(
+            {"optimal": "ÓPTIMO", "degraded": "BAJO", "failing": "CRÍTICO"}.get(health, "EN ESPERA")
+        )
+        self.buffer_state.set_variant(
+            "accent" if health == "optimal" else ("warning" if health == "degraded" else "chip")
+        )
+
+        clock = snapshot.hardware_clock or snapshot.source_rate
+        clock_text = humanise_rate(clock) if clock else "—"
+        self.fill_row.set_value(f"{snapshot.buffer_ms:.1f} ms · {snapshot.buffer_fill * 100:.0f} %")
+        self.capacity_row.set_value(f"{snapshot.buffer_capacity_ms:.0f} ms a {clock_text}")
+        self.latency_row.set_value(f"{snapshot.latency_ms:.1f} ms")
+        xrun_color = QColor(PALETTE.danger) if snapshot.xruns else QColor(PALETTE.success)
+        self.xrun_row.set_value(f"{snapshot.xruns} · {snapshot.silence_frames} tramas de silencio")
+        self.xrun_row.set_value_color(xrun_color)
 
         self.conversion_row.set_value(snapshot.conversion_chain or "—")
         self.driver_row.set_value(snapshot.driver_label or "—")
-        priority_text = "REALTIME" if snapshot.priority_realtime else "standard"
-        self.priority_row.set_value(priority_text)
-        self.device_row.set_value(snapshot.device_name or "—")
+        self.priority_row.set_value("TIEMPO REAL" if snapshot.priority_realtime else "estándar")
         notes = list(snapshot.track_notes)
         if snapshot.last_error:
             notes.insert(0, snapshot.last_error)
-        self.notes.setText(" · ".join(notes[:4]) if notes else "No processing stages in the signal path.")
-        self.dsp_chip.set_text("ZERO DSP" if not snapshot.dsp_chain else f"{len(snapshot.dsp_chain)} STAGES")
-        self.dsp_chip.set_variant("accent" if not snapshot.dsp_chain else "warning")
+        self.notes.setText(" · ".join(notes[:3]) if notes else "Ninguna etapa de procesamiento en la ruta de señal.")

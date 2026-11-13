@@ -327,6 +327,64 @@ def _save_path(rect: QRectF) -> list[QPainterPath]:
     return [body, slot, label]
 
 
+# --------------------------------------------------------------------- caching
+# An icon path depends only on the (stable) icon box, so rebuilding the geometry
+# on every paintEvent would allocate inside the hot path of every hover
+# animation.  The generators are wrapped once at import time and reused.
+_PATH_CACHE_LIMIT = 256
+
+
+def _cached_paths(generator):
+    cache: dict = {}
+
+    def wrapper(rect: QRectF, *extra, **options):
+        key = (
+            round(rect.x(), 2),
+            round(rect.y(), 2),
+            round(rect.width(), 2),
+            round(rect.height(), 2),
+            extra,
+            tuple(sorted(options.items())),
+        )
+        value = cache.get(key)
+        if value is None:
+            if len(cache) >= _PATH_CACHE_LIMIT:
+                cache.clear()
+            value = generator(rect, *extra, **options)
+            cache[key] = value
+        return value
+
+    wrapper.__name__ = getattr(generator, "__name__", "cached_paths")
+    wrapper.__doc__ = generator.__doc__
+    return wrapper
+
+
+for _generator_name in (
+    "_play_path",
+    "_pause_paths",
+    "_skip_path",
+    "_repeat_paths",
+    "_shuffle_paths",
+    "_folder_path",
+    "_search_path",
+    "_settings_path",
+    "_queue_path",
+    "_library_path",
+    "_chip_path",
+    "_refresh_path",
+    "_close_path",
+    "_check_path",
+    "_power_path",
+    "_stop_path",
+    "_info_path",
+    "_eject_path",
+    "_volume_off_path",
+    "_save_path",
+):
+    globals()[_generator_name] = _cached_paths(globals()[_generator_name])
+del _generator_name
+
+
 FILLED_ICONS = {"play", "stop", "previous", "next", "repeat", "repeat_one"}
 
 

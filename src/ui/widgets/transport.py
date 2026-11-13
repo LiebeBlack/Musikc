@@ -27,12 +27,12 @@ class TransportBar(QWidget):
         layout.setSpacing(6)
         self.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
 
-        self.stop_button = IconButton("stop", "Stop (Ctrl+.)", size=34, icon_size=16)
-        self.previous_button = IconButton("previous", "Previous track (Ctrl+←)", size=40, icon_size=17)
-        self.play_button = IconButton("play", "Play / Pause (Space)", size=56, icon_size=22, accent=True)
-        self.next_button = IconButton("next", "Next track (Ctrl+→)", size=40, icon_size=17)
-        self.repeat_button = IconButton("repeat", "Repeat mode", size=36, icon_size=16, checkable=True)
-        self.shuffle_button = IconButton("shuffle", "Shuffle", size=36, icon_size=16, checkable=True)
+        self.stop_button = IconButton("stop", "Detener (Ctrl+.)", size=34, icon_size=16)
+        self.previous_button = IconButton("previous", "Pista anterior (Ctrl+←)", size=40, icon_size=17)
+        self.play_button = IconButton("play", "Reproducir / Pausar (Espacio)", size=56, icon_size=22, accent=True)
+        self.next_button = IconButton("next", "Pista siguiente (Ctrl+→)", size=40, icon_size=17)
+        self.repeat_button = IconButton("repeat", "Modo de repetición", size=36, icon_size=16, checkable=True)
+        self.shuffle_button = IconButton("shuffle", "Reproducción aleatoria", size=36, icon_size=16, checkable=True)
         self._has_track = False
         self._update_enabled_state()
 
@@ -45,13 +45,13 @@ class TransportBar(QWidget):
         layout.addWidget(self.repeat_button)
         layout.addWidget(self.shuffle_button)
 
-        self.stop_button.setToolTip("Stop")
-        self.play_button.setAccessibleName("Play or pause")
-        self.previous_button.setAccessibleName("Previous track")
-        self.next_button.setAccessibleName("Next track")
-        self.stop_button.setAccessibleName("Stop playback")
-        self.repeat_button.setAccessibleName("Repeat mode")
-        self.shuffle_button.setAccessibleName("Shuffle queue")
+        self.stop_button.setToolTip("Detener")
+        self.play_button.setAccessibleName("Reproducir o pausar")
+        self.previous_button.setAccessibleName("Pista anterior")
+        self.next_button.setAccessibleName("Pista siguiente")
+        self.stop_button.setAccessibleName("Detener reproducción")
+        self.repeat_button.setAccessibleName("Modo de repetición")
+        self.shuffle_button.setAccessibleName("Reproducción aleatoria de la cola")
         self._playing = False
 
         self.stop_button.clicked.connect(self.stopRequested.emit)
@@ -66,7 +66,7 @@ class TransportBar(QWidget):
         if playing != self._playing:
             self._playing = playing
             self.play_button.set_icon("pause" if playing else "play")
-            self.play_button.setToolTip("Pause (Space)" if playing else "Play (Space)")
+            self.play_button.setToolTip("Pausar (Espacio)" if playing else "Reproducir (Espacio)")
 
     def set_transport_enabled(self, enabled: bool) -> None:
         self._has_track = bool(enabled)
@@ -86,14 +86,14 @@ class TransportBar(QWidget):
         self.repeat_button.set_icon(icon)
         self.repeat_button.setChecked(mode != "off")
         self.repeat_button.setToolTip(
-            {"off": "Repeat: off", "all": "Repeat: queue", "one": "Repeat: track"}.get(mode, "Repeat")
+            {"off": "Repetición: desactivada", "all": "Repetir cola", "one": "Repetir pista"}.get(mode, "Repetición")
         )
         self.repeat_button.set_accent(mode != "off")
 
     def set_shuffle(self, enabled: bool) -> None:
         self.shuffle_button.setChecked(enabled)
         self.shuffle_button.set_accent(enabled)
-        self.shuffle_button.setToolTip("Shuffle: on" if enabled else "Shuffle: off")
+        self.shuffle_button.setToolTip("Aleatorio: activado" if enabled else "Aleatorio: desactivado")
 
     def flash_play(self) -> None:
         self.play_button.setFocus(Qt.FocusReason.OtherFocusReason)

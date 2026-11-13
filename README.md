@@ -152,12 +152,19 @@ your device accepted during probing.
 
 | Area | Contents |
 | --- | --- |
-| Header | BIT-PERFECT badge, DAC selector, exclusive switch, driver and clock pills |
+| Header | BIT-PERFECT badge, the single DAC selector, exclusive switch, driver and clock pills |
 | Now playing | Title, artist, album, format chips, millisecond seek bar, transport |
-| Session queue | Reorderable table (drag), double-click to play, Delete to remove, context menu |
+| Session queue | Reorderable table (drag), double-click to play, Delete to remove, context menu, quick clear |
 | Library | Header-only index, instant search, folder scanning in a background thread |
-| Hardware | Device list, exclusive mode, clock probing, live telemetry tiles, buffer sparkline |
-| Session | Source metadata, DAC transport, integrity verdict, DSP policy chips |
+| Hardware | Native clock matrix (probing), negotiated transport parameters, buffer history, signal path |
+| Session | Source metadata, DAC transport, byte count, integrity digest and verdict, DSP policy chips |
+| Status strip | Live clock, depth, buffer, latency, dropout counter and status messages |
+
+Each fact appears once: the device is chosen only in the header, and the live
+numbers are shown in the status strip while their detailed report lives in the
+**Hardware** and **Session** tabs. Telemetry is published at the stream cadence
+while audio plays and once per second otherwise, so the background cost of the
+BADGE is negligible when the engine is idle.
 
 Keyboard: `Space` play/pause · `Ctrl+O` open files · `Ctrl+Shift+O` open folder ·
 `Ctrl+←/→` seek ±5 s · `Alt+←/→` previous/next · `Ctrl+.` stop · `F5` rescan DACs ·

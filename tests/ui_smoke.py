@@ -146,7 +146,7 @@ def main() -> int:
             ),
             [0.45 + 0.1 * ((index * 7) % 11) / 11 for index in range(240)],
         )
-        window.session_panel.update_from(engine.snapshot(), engine)
+        window.session_panel.update_from(engine.snapshot())
 
         shots = []
 

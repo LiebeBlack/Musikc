@@ -104,7 +104,6 @@ def test_pages_workflow_validates_deploys_and_uses_permissions():
 def test_pages_preparation_uses_real_repository_and_escapes_replacement(monkeypatch):
     import scripts.prepare_docs as prepare_docs
 
-    source = DOCS / "index.html"
     pages = ("index.html", "architecture.html", "installation.html", "support.html", "404.html")
     originals = {name: (DOCS / name).read_text(encoding="utf-8") for name in pages}
     try:
