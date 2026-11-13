@@ -28,7 +28,6 @@ from src.core.library import Library, LibraryEntry
 from src.core.playlist import Playlist, RepeatMode, Track
 from src.core.telemetry import TelemetrySnapshot
 from src.ui.main_window import PreferencesDialog
-from src.ui.theme import apply_theme
 from src.ui.widgets.badge import BitPerfectBadge
 from src.ui.widgets.library_view import LibraryTableModel, LibraryView
 from src.ui.widgets.playlist_view import MIME_TYPE, PlaylistTableModel, PlaylistView
@@ -37,10 +36,8 @@ from src.ui.widgets.telemetry_panel import TelemetryPanel
 
 
 @pytest.fixture(scope="module")
-def app() -> QApplication:
-    application = QApplication.instance() or QApplication([])
-    apply_theme(application)
-    return application
+def app(qapp: QApplication) -> QApplication:
+    return qapp
 
 
 def make_playlist() -> Playlist:

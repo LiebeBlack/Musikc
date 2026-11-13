@@ -109,6 +109,16 @@ def build_app_icon(size: int = 256) -> QIcon:
     return icon
 
 
+def clear_icon_cache() -> None:
+    """Drop cached QIcons while a QGuiApplication is still alive.
+
+    Destroying them after the application is gone crashes the interpreter at
+    shutdown, which is what broke the Linux CI run.
+    """
+
+    _APP_ICON_CACHE.clear()
+
+
 class LogoMark(QWidget):
     """Vector brand mark."""
 

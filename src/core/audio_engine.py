@@ -476,7 +476,15 @@ class AudioEngine:
             return
 
         self._teardown_playback(keep_stream=False)
+        previous = self._decoder
         self._decoder = decoder
+        if previous is not None and previous is not decoder:
+            # Replacing the source must release its handle, otherwise every
+            # format change leaks a file descriptor until shutdown.
+            try:
+                previous.close()
+            except Exception:
+                LOGGER.warning("decoder close failed", extra={"decoder": repr(previous)})
         self._decode_state_reset(info)
         self._publish_track(info, gapless=False)
         # Remember the intent before negotiating: if the DAC cannot lock the

@@ -24,16 +24,14 @@ from src.core.playlist import PlaybackController, Playlist
 from src.core.telemetry import TelemetryHub
 from src.ui.main_window import MainWindow
 from src.ui.qt_bridge import QtBridge
-from src.ui.theme import apply_theme, build_stylesheet
+from src.ui.theme import build_stylesheet
 from src.ui.widgets.base import IconButton
 from src.ui.widgets.now_playing import NowPlayingCard
 
 
 @pytest.fixture(scope="module")
-def app() -> QApplication:
-    application = QApplication.instance() or QApplication([])
-    apply_theme(application)
-    return application
+def app(qapp: QApplication) -> QApplication:
+    return qapp
 
 
 def make_window(tmp_path: Path) -> MainWindow:
